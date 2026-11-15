@@ -136,6 +136,7 @@ details summary{font-weight:600;color:var(--navy)}
 .pipe-col .card{margin:6px 0 0}
 .day-h{font-weight:700;color:var(--navy);margin:16px 0 6px;font-size:14px}
 .note{font-size:12.5px;color:var(--muted);line-height:1.45}
+body.gate nav,body.gate .fab,body.gate .fab2,body.gate .hdr-btn,body.gate #cloud{display:none!important}
 </style>
 </head>
 <body>
@@ -262,8 +263,19 @@ function go(v, isBack){
   for(var i=0;i<bs.length;i++){ bs[i].className = bs[i].getAttribute('data-v')===v ? 'on' : ''; }
   render(); window.scrollTo(0,0);
 }
+function vEntrar(){
+  return '<div style="max-width:380px;margin:8vh auto 0;text-align:center">'+
+    '<div class="logo" style="width:64px;height:64px;font-size:26px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center">JS</div>'+
+    '<h2 style="margin:0 0 4px">Área reservada</h2><div class="note" style="margin-bottom:18px">CRM de Josimar Souza · Imotrust</div>'+
+    '<div class="card" style="text-align:left"><label>Email</label><input id="lemail" type="email" autocomplete="username" autocapitalize="off">'+
+    '<label>Palavra-passe</label><input id="lpw" type="password" autocomplete="current-password" onkeydown="if(event.keyCode===13)doLogin(\'in\')">'+
+    '<button class="btn gold full" style="margin-top:14px" onclick="doLogin(\'in\')">Entrar</button></div>'+
+    '<div class="note" style="margin-top:16px">Procura casa ou quer vender? <a href="procuro/" style="color:inherit;font-weight:700">Deixe aqui o seu pedido ›</a></div></div>';
+}
 function render(){
   var h='';
+  if(!sess){ document.body.className=(document.body.className.replace(/\s*\bgate\b/g,'')+' gate').trim(); document.getElementById('view').innerHTML=vEntrar(); return; }
+  document.body.className=document.body.className.replace(/\s*\bgate\b/g,'').trim();
   if(cur==='hoje') h=vHoje();
   else if(cur==='contactos') h=vContactos();
   else if(cur==='pipeline') h=vPipeline();
