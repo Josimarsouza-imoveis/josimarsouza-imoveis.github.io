@@ -10,7 +10,7 @@
 <meta name="theme-color" content="#14161B">
 <title>CRM Imobiliário · Josimar Souza</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,500;0,600;1,500&display=swap">
@@ -419,6 +419,7 @@ function vMais(){
        '<div class="note" style="margin-top:8px">Primeira vez: escolha um email e uma palavra-passe (mín. 8 caracteres) e toque em “Criar conta”. A primeira conta criada fica como única dona do CRM.</div>';
   }
   h+='</div>';
+  if(sess) h+=pushCard();
   h+='<h3>Angariação</h3><div class="card"><button class="btn full" onclick="go(\'olx\')">🏠 Leads de anúncios</button><button class="btn ghost full" style="margin-top:8px" onclick="go(\'ang\')">📄 Contratos e comissões</button><button class="btn ghost full" style="margin-top:8px" onclick="numMes=0;go(\'num\')">📈 Números do mês</button><button class="btn ghost full" style="margin-top:8px" onclick="go(\'mercado\')">📊 Mercado da zona</button><button class="btn ghost full" style="margin-top:8px" onclick="radarSel=0;go(\'radar\')">📡 Radar semanal</button></div>';
   h+='<h3>Captar clientes</h3><div class="card"><button class="btn gold full" onclick="openCaptar()">📝 Formulário “Diga-me o que procura”</button><div class="note" style="margin-top:8px">Link e código QR para o Instagram, WhatsApp e cartas. Os pedidos entram aqui sozinhos.</div></div>';
   h+='<h3>Alertas de acompanhamento</h3><div class="card">'+
@@ -2463,9 +2464,93 @@ function saveAudio(){
   else { openContact(c.id); toast(added.length?('Nota + '+added.length+' agendamentos guardados'):'Nota guardada'); }
 }
 
+/* ---------- Notificações push (pedidos do formulário e leads dos portais) ---------- */
+var VAPID_PUB='BNXhTRCbjbGqYY9gjgc6h-Dcnab5hr5JN3eHSGrg5MRaFSk7Akz1Y1LE9UBKzgUrLYz-JnjmErH1fIMVS1yhge8';
+function pushSuportado(){ return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window); }
+function ehIOS(){ return /iPhone|iPad|iPod/.test(navigator.userAgent); }
+function ehInstalada(){ return (window.navigator.standalone===true) || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches); }
+function pushLigado(){ try{ return localStorage.getItem('crm_push')==='1' && pushSuportado() && Notification.permission==='granted'; }catch(e){ return false; } }
+function b64uBytes(s){
+  var p=(s+'===='.slice((s.length%4)||4)).replace(/-/g,'+').replace(/_/g,'/');
+  var raw=atob(p), a=new Uint8Array(raw.length);
+  for(var i=0;i<raw.length;i++) a[i]=raw.charCodeAt(i);
+  return a;
+}
+function pushCard(){
+  var h='<h3>Notificações</h3><div class="card">';
+  if(!pushSuportado()){
+    if(ehIOS() && !ehInstalada()) h+='<div class="note">Para receber avisos no iPhone, abra a app pelo <b>ícone do ecrã principal</b> (Safari → Partilhar → Adicionar ao ecrã principal) e volte aqui.</div>';
+    else h+='<div class="note">Este navegador não permite notificações. No iPhone é preciso iOS 16.4 ou mais recente e abrir a app pelo ícone do ecrã principal.</div>';
+  } else if(Notification.permission==='denied'){
+    h+='<div class="note">As notificações estão bloqueadas. Ative em <b>Definições → Notificações → JS Imóveis</b> e volte aqui.</div>';
+  } else if(pushLigado()){
+    h+='<div><b>🔔 Ligadas neste telemóvel</b></div><div class="note" style="margin:4px 0 10px">Recebe um aviso quando chega um pedido do formulário e quando entram anúncios novos de particulares (entre as 7h e as 21h).</div>'+
+       '<div class="btns"><button class="btn" onclick="testarPush()">Enviar teste</button><button class="btn ghost" onclick="desligarPush()">Desligar</button></div>';
+  } else {
+    h+='<button class="btn gold full" onclick="ativarPush()">🔔 Ativar notificações</button><div class="note" style="margin-top:8px">Aviso imediato de novos pedidos do formulário e de anúncios novos de particulares.</div>';
+  }
+  return h+'</div>';
+}
+function ativarPush(){
+  if(!sess){ toast('Entre na conta primeiro'); return; }
+  if(!pushSuportado()){ toast('Notificações não disponíveis aqui'); return; }
+  var pr=Notification.requestPermission();
+  if(!pr || !pr.then){ toast('Atualize o iOS para usar notificações'); return; }
+  pr.then(function(p){
+    if(p!=='granted'){ toast('Permissão não dada'); render(); return; }
+    toast('A ligar…');
+    navigator.serviceWorker.register('sw.js').then(function(){ return navigator.serviceWorker.ready; }).then(function(reg){
+      return reg.pushManager.getSubscription().then(function(s){
+        return s || reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64uBytes(VAPID_PUB)});
+      });
+    }).then(function(sub){
+      var j=sub.toJSON();
+      rest('POST','/rest/v1/crm_push_subs?on_conflict=endpoint', JSON.stringify({endpoint:j.endpoint, sub:j, device:String(navigator.userAgent).slice(0,140)}), 'resolution=merge-duplicates,return=minimal', function(st){
+        if(st>=200 && st<300){ try{ localStorage.setItem('crm_push','1'); }catch(e){} render(); testarPush(); }
+        else toast('Não foi possível guardar (sem ligação?)');
+      });
+    })['catch'](function(e){ toast('Erro ao ligar: '+String(e&&e.message||e).slice(0,60)); });
+  });
+}
+function testarPush(){
+  withToken(function(t){
+    if(!t){ toast('Sem ligação / sessão'); return; }
+    xhr('POST', SB_URL+'/functions/v1/push-enviar', {apikey:SB_KEY, Authorization:'Bearer '+t, 'Content-Type':'application/json'}, '{}', function(st,j){
+      if(st===200 && j && j.enviados>0) toast('Teste enviado — deve chegar já');
+      else if(st===200) toast('Nenhum telemóvel ligado ainda');
+      else toast('Falhou o envio do teste');
+    });
+  });
+}
+function desligarPush(){
+  try{ localStorage.removeItem('crm_push'); }catch(e){}
+  if(!pushSuportado()){ render(); return; }
+  navigator.serviceWorker.ready.then(function(reg){ return reg.pushManager.getSubscription(); }).then(function(s){
+    if(!s){ render(); return; }
+    var ep=s.endpoint;
+    s.unsubscribe();
+    rest('DELETE','/rest/v1/crm_push_subs?endpoint=eq.'+encodeURIComponent(ep), null, 'return=minimal', function(){ render(); toast('Notificações desligadas'); });
+  })['catch'](function(){ render(); });
+}
+function abrirLink(u){
+  var q; try{ q=new URL(u, location.href).searchParams; }catch(e){ return; }
+  var c=q.get('c'), vv=q.get('v');
+  if(c){
+    if(byId(c)){ openContact(c); return; }
+    if(!sess) return;
+    sync(false);
+    var tries=0, iv=setInterval(function(){ tries++; if(byId(c)){ clearInterval(iv); openContact(c); } else if(tries>30) clearInterval(iv); }, 500);
+  } else if(vv==='olx'){ go('olx'); }
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js')['catch'](function(){});
+  navigator.serviceWorker.addEventListener('message', function(e){ if(e.data && e.data.abrir) abrirLink(e.data.abrir); });
+}
+
 render();
 setCloud(sess?'ok':'');
 if(sess) sync(false);
+if(location.search && /[?&](c|v)=/.test(location.search)){ var _q=location.search; try{ history.replaceState(null,'',location.pathname); }catch(e){} setTimeout(function(){ abrirLink(_q); }, 300); }
 document.addEventListener('visibilitychange', function(){ if(!document.hidden && sess) sync(false); });
 </script>
 </body>
