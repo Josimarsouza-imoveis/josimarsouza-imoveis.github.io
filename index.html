@@ -414,6 +414,29 @@ function apCard(c, a, showName){
 }
 
 /* ---------- MAIS ---------- */
+function openManual(){
+  var h='<div class="sheet-h"><h2>Manual de vendas da IA</h2><button class="x" onclick="closeModal()">×</button></div>';
+  h+='<div class="note" style="margin-bottom:8px">A IA lê este texto sempre que escreve mensagens de follow-up, argumentos para anúncios, conselhos das conversas de WhatsApp e dicas das notas de áudio. Acrescente o que aprender (ex.: frases que resultaram, objeções novas, ideias de outro livro).</div>';
+  h+='<div id="manbox"><div class="spin">A carregar…</div></div>';
+  openModal(h);
+  rest('GET','/rest/v1/crm_ia_cfg?k=eq.manual&select=v,updated_at',null,null,function(st,rows){
+    var e=document.getElementById('manbox'); if(!e) return;
+    if(st!==200){ e.innerHTML='<div class="note">Não foi possível carregar (sem ligação?).</div>'; return; }
+    var t=rows&&rows[0]?rows[0].v:'';
+    e.innerHTML='<label>Acrescentar uma aprendizagem (opcional)</label><textarea id="manadd" style="min-height:70px" placeholder="Ex.: Com proprietários desconfiados, resulta perguntar primeiro há quanto tempo está à venda e o que já tentaram."></textarea>'+
+      '<button class="btn gold full" style="margin-top:8px" onclick="saveManual(true)">＋ Acrescentar ao manual</button>'+
+      '<details style="margin-top:14px"><summary>Ver / editar o manual completo</summary><textarea id="mantxt" style="min-height:420px;margin-top:8px;font-size:13px">'+esc(t)+'</textarea>'+
+      '<button class="btn full" style="margin-top:8px" onclick="saveManual(false)">Guardar alterações</button></details>';
+  });
+}
+function saveManual(soAdd){
+  var base=(document.getElementById('mantxt')||{}).value||'', add=((document.getElementById('manadd')||{}).value||'').trim();
+  if(soAdd){ if(!add){ toast('Escreva a aprendizagem'); return; } if(base.indexOf('10. APRENDIZAGENS DO JOSIMAR')<0) base+='\n\n10. APRENDIZAGENS DO JOSIMAR (prioridade: vêm da experiência real dele)'; base+='\n- '+add; }
+  if(base.trim().length<50){ toast('O manual ficou demasiado curto'); return; }
+  rest('POST','/rest/v1/crm_ia_cfg?on_conflict=k', JSON.stringify({k:'manual', v:base, updated_at:new Date().toISOString()}), 'resolution=merge-duplicates,return=minimal', function(st){
+    if(st>=200&&st<300){ toast(soAdd?'Aprendizagem acrescentada':'Manual guardado'); openManual(); } else toast('Não foi possível guardar');
+  });
+}
 function vMais(){
   var n=db.contacts.length, f=0, p=0;
   for(var i=0;i<n;i++){ if(db.contacts[i].estado==='Angariado / Fechado') f++; if(db.contacts[i].estado==='Perdido') p++; }
@@ -433,6 +456,7 @@ function vMais(){
   h+='</div>';
   if(sess) h+=pushCard();
   h+='<h3>Angariação</h3><div class="card"><button class="btn full" onclick="go(\'olx\')">🏠 Leads de anúncios</button><button class="btn ghost full" style="margin-top:8px" onclick="go(\'ang\')">📄 Contratos e comissões</button><button class="btn ghost full" style="margin-top:8px" onclick="numMes=0;go(\'num\')">📈 Números do mês</button><button class="btn ghost full" style="margin-top:8px" onclick="go(\'mercado\')">📊 Mercado da zona</button><button class="btn ghost full" style="margin-top:8px" onclick="radarSel=0;go(\'radar\')">📡 Radar semanal</button></div>';
+  if(sess) h+='<h3>Inteligência artificial</h3><div class="card"><button class="btn full" onclick="openManual()">🧠 Manual de vendas da IA</button><div class="note" style="margin-top:8px">As técnicas de persuasão que a IA aplica nas mensagens, argumentos e conselhos. Pode acrescentar ou mudar.</div></div>';
   h+='<h3>Captar clientes</h3><div class="card"><button class="btn gold full" onclick="openCaptar()">📝 Formulário “Diga-me o que procura”</button><div class="note" style="margin-top:8px">Link e código QR para o Instagram, WhatsApp e cartas. Os pedidos entram aqui sozinhos.</div></div>';
   h+='<h3>Alertas de acompanhamento</h3><div class="card">'+
      '<div class="g2"><div><label>Responder a contactos novos em até (horas)</label><input type="number" inputmode="numeric" min="1" value="'+cfg.rapidoH+'" onchange="setCfg(\'rapidoH\',this.value)"></div></div>'+
@@ -2624,6 +2648,13 @@ function reviewAudio(r, cid){
   var txt=r.resumo||''; for(i=0;i<(r.pontos||[]).length;i++) txt+=(txt?'\n':'')+'• '+r.pontos[i];
   if(!txt) txt=r.transcricao||'';
   h+='<label>Nota (o mais importante)</label><textarea id="anotaTxt" style="min-height:150px">'+esc(txt)+'</textarea>';
+  if(r.dica) h+='<div class="card note" style="margin-top:10px;background:var(--cream)">🎯 <b>Dica para o próximo contacto:</b> '+esc(r.dica)+'</div>';
+  if(r.conselho && r.conselho.mensagem){
+    h+='<h3>🎯 Próxima mensagem sugerida</h3><div class="card">'+(r.conselho.tecnica?'<span class="tag gold">'+esc(r.conselho.tecnica)+'</span>':'')+
+       (r.conselho.porque?'<div class="note" style="margin:6px 0">'+esc(r.conselho.porque)+'</div>':'')+
+       '<textarea id="acons" style="min-height:110px">'+esc(r.conselho.mensagem)+'</textarea>'+
+       '<div class="btns" style="margin-top:8px"><button class="btn ghost sm" onclick="toast(copyEl(\'acons\')?\'Mensagem copiada\':\'Copie manualmente\')">📋 Copiar</button><button class="btn gold sm" onclick="consWA()">💬 Abrir no WhatsApp</button></div></div>';
+  }
   h+='<h3>'+(wa?'Próximos passos para a agenda':'Compromissos para a agenda')+'</h3>';
   var cp=r.compromissos||[], nSug=0;
   if(!cp.length) h+='<div class="note">Não foi detetado nenhum compromisso com data'+(wa?' na conversa.':' no áudio.')+'</div>';
@@ -2643,6 +2674,11 @@ function reviewAudio(r, cid){
   if(r.transcricao) h+='<details><summary>'+(wa?'Ver conversa analisada':'Ver transcrição completa')+'</summary><div style="white-space:pre-wrap;margin-top:8px">'+esc(r.transcricao)+'</div></details>';
   h+='<button class="btn gold full" style="margin-top:16px" onclick="saveAudio()">'+(wa?'Guardar resumo e agendamentos':'Guardar nota e agendamentos')+'</button>';
   openModal(h);
+}
+function consWA(){
+  var sel=v('acont'), c=sel&&sel!=='__new'?byId(sel):null, tel=(c&&c.tel)||(audRes&&audRes.tel)||((document.getElementById('atel')||{}).value)||'';
+  var t=(document.getElementById('acons')||{}).value||'';
+  abrirExt('https://wa.me/'+(telNorm(tel)||'')+'?text='+encodeURIComponent(t));
 }
 function saveAudio(){
   var r=audRes, sel=v('acont'), c, i, added=[];
