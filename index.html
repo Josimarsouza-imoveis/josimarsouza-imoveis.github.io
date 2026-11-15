@@ -992,8 +992,8 @@ function top10(){
   out.sort(function(a,b){ return (tmOf(b).timing||0)-(tmOf(a).timing||0); });
   return out.slice(0,10);
 }
-function argCache(){ var o=null; try{ o=JSON.parse(localStorage.getItem('crm_args')||'null'); }catch(e){} if(!o||o.d!==ymd(new Date())) o={d:ymd(new Date()), a:{}}; return o; }
-function argSave(o){ try{ localStorage.setItem('crm_args', JSON.stringify(o)); }catch(e){} }
+function argCache(){ var o=null; try{ o=JSON.parse(localStorage.getItem('crm_args2')||'null'); }catch(e){} if(!o||o.d!==ymd(new Date())) o={d:ymd(new Date()), a:{}}; return o; }
+function argSave(o){ try{ localStorage.setItem('crm_args2', JSON.stringify(o)); }catch(e){} }
 function argTemplate(L){
   var tm=tmOf(L), z=leadZona(L), arr=/arrend|alug/i.test(L.negocio||'');
   if(tm.descidas>0) return 'Vi que já ajustou o preço'+(tm.descidas>1?' '+tm.descidas+' vezes':'')+'. Tenho dados do que se está a vender em '+z+' que podem ajudar a decidir o próximo passo. Posso enviar-lhe sem compromisso?';
