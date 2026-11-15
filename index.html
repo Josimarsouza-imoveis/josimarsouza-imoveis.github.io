@@ -326,7 +326,7 @@ function vHoje(){
   h+='<div class="stats"><div class="stat"><b>'+hoje.length+'</b><span>Hoje</span></div>'+
      '<div class="stat '+(atrasados.length?'alert':'')+'"><b>'+atrasados.length+'</b><span>Atrasados</span></div>'+
      '<div class="stat"><b>'+ativos+'</b><span>Ativos</span></div></div>';
-  h+=alertasHoje()+matchesHoje();
+  h+=alertasHoje()+matchesHoje()+dezHojeCard();
   var ct=contratosAlerta();
   if(ct.length){ h+='<h3 style="color:var(--red)">📄 Contratos a terminar ('+ct.length+')</h3>'; for(i=0;i<ct.length;i++) h+=angCard(ct[i]); }
   if(sem.length){ h+='<h3 style="color:var(--red)">⚠️ Sem agendamento ('+sem.length+')</h3>'; for(i=0;i<sem.length;i++) h+=contactCard(sem[i]); }
@@ -914,14 +914,18 @@ function portal(L){
 function origemDe(L){ var p=portal(L); return ORIGENS.indexOf(p)>-1?p:'Outro'; }
 function loadOlx(){
   olxLoading=true;
-  rest('GET','/rest/v1/leads?select=id,stage,notes,listings!leads_listing_id_fkey(id,source,title,price,area_m2,tipologia,freguesia,concelho,url,score,negocio,is_active,fora_do_alvo,sem_imobiliarias,republicado,posted_at,first_seen_at)&stage=eq.novo&do_not_contact=eq.false&limit=300',null,null,function(st,rows){
-    olxLoading=false;
+  rest('GET','/rest/v1/leads?select=id,stage,next_action_at,phone,notes,listings!leads_listing_id_fkey(id,source,title,price,area_m2,tipologia,freguesia,concelho,url,score,negocio,is_active,fora_do_alvo,sem_imobiliarias,republicado,posted_at,first_seen_at)&stage=in.(novo,contactado,nutrir)&do_not_contact=eq.false&limit=400',null,null,function(st,rows){
     if(st===200 && rows){
-      olx=[];
-      for(var i=0;i<rows.length;i++){ var L=rows[i].listings||{}; if(L.fora_do_alvo) continue; L.lead=rows[i].id; olx.push(L); }
-      olx.sort(function(a,b){ return (b.score||0)-(a.score||0); });
-    } else { olx=[]; toast('Não foi possível carregar os leads'); }
-    if(cur==='olx' || (cur==='hoje' && !modalAberto())) render();
+      var lst=[];
+      for(var i=0;i<rows.length;i++){ var L=rows[i].listings||{}; if(L.fora_do_alvo) continue; L.lead=rows[i].id; L.stage=rows[i].stage; L.next=rows[i].next_action_at; L.phone=rows[i].phone||''; lst.push(L); }
+      rest('POST','/rest/v1/rpc/leads_timing','{}',null,function(st2,tms){
+        var map={}; if(st2===200 && tms && tms.length){ for(var k=0;k<tms.length;k++) map[tms[k].lead]=tms[k]; }
+        for(var m=0;m<lst.length;m++){ lst[m].tm=map[lst[m].lead]||null; }
+        lst.sort(function(a,b){ return (tmOf(b).timing||0)-(tmOf(a).timing||0) || (b.score||0)-(a.score||0); });
+        olx=lst; olxLoading=false;
+        if(cur==='olx' || (cur==='hoje' && !modalAberto())) render();
+      });
+    } else { olx=[]; olxLoading=false; toast('Não foi possível carregar os leads'); if(cur==='olx') render(); }
   });
 }
 var olxHideNo=false, lastDis=null;
@@ -940,31 +944,221 @@ function vOlx(){
   if(ps.length>2){ h+='</div><div class="chips">'; for(i=0;i<ps.length;i++) h+='<button class="chip '+(olxP===ps[i]?'on':'')+'" onclick="olxP=\''+esc(ps[i])+'\';render()">'+esc(ps[i])+(i?' ('+pc[ps[i]]+')':'')+'</button>'; }
   h+='<button class="chip" onclick="olx=null;lastDis=null;render()">↻ Atualizar</button></div>';
   if(lastDis) h+='<button class="btn ghost sm full" style="margin-bottom:10px" onclick="undoLead()">↩︎ Anular: “'+esc(String(lastDis.L.title||'anúncio').substring(0,40))+'”</button>';
+  var ret=[], segN=0; for(i=0;i<olx.length;i++){ if(olx[i].stage!=='novo'){ if(leadDue(olx[i])) ret.push(olx[i]); else segN++; } }
+  if(ret.length){ h+='<h3>🔁 Para retomar hoje ('+ret.length+')</h3>'; for(i=0;i<ret.length;i++) h+=olxCard(ret[i]); }
+  if(segN) h+='<div class="note" style="margin:0 0 10px">'+segN+' em seguimento, com data marcada para mais tarde.</div>';
+  if(ret.length) h+='<h3>Novos</h3>';
   var n2=0;
   for(i=0;i<olx.length;i++){
     var L=olx[i];
+    if(L.stage!=='novo') continue;
     if(olxF!=='Todos' && (L.negocio||'outro')!==olxF) continue;
     if(olxHideNo && L.sem_imobiliarias) continue;
     if(olxP!=='Todos' && portal(L)!==olxP) continue;
     n2++;
-    var loc=[L.tipologia,L.freguesia,L.concelho].join(' · ').replace(/^( · )+|( · )+$/g,'').replace(/( · ){2,}/g,' · ');
-    var okUrl=L.url && /^https?:\/\//.test(L.url), dd=diasDesde(L.posted_at), q="'"+esc(L.lead)+"'";
-    h+='<div class="card"><div class="name" style="white-space:normal">'+esc(L.title||'Anúncio sem título')+'</div>'+
-       '<div class="sub">'+(L.price?esc(Number(L.price).toLocaleString('pt-PT'))+' € · ':'')+esc(loc)+'</div>'+
-       '<div><span class="tag">'+esc(portal(L))+'</span><span class="tag gold">Score '+esc(L.score||0)+'</span>'+olxMkt(L)+(L.negocio?'<span class="tag">'+esc(L.negocio)+'</span>':'')+
-       (dd!==null?'<span class="tag">há '+dd+(dd===1?' dia':' dias')+'</span>':'')+
-       (L.republicado?'<span class="tag blue">Republicado</span>':'')+
-       (L.sem_imobiliarias?'<span class="tag red">Dispensa agências</span>':'')+
-       (L.is_active===false?'<span class="tag red">Inativo</span>':'')+'</div>'+
-       '<div class="btns" style="margin-top:10px"><button class="btn gold sm" onclick="contactLead('+q+')">💬 Contactar</button>'+
-       (okUrl?'<a class="btn ghost sm" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="'+esc(L.url)+'">Ver anúncio</a>':'')+'</div>'+
-       '<div class="btns" style="margin-top:8px"><button class="btn ghost sm" onclick="dismissLead('+q+',\'nao_interessa\')">✕ Não interessa</button>'+
-       '<button class="btn ghost sm" onclick="dismissLead('+q+',\'agencia\')">🏢 É agência</button>'+
-       '<button class="btn ghost sm" onclick="convLead('+q+')">＋ Contacto</button></div></div>';
+    h+=olxCard(L);
   }
   if(!n2) h+='<div class="empty">Sem leads novos.</div>'; else h+='<div class="note" style="text-align:center;margin-top:6px">'+n2+' lead(s)</div>';
   return h;
 }
+function olxCard(L){
+  var loc=[L.tipologia,L.freguesia,L.concelho].join(' · ').replace(/^( · )+|( · )+$/g,'').replace(/( · ){2,}/g,' · ');
+  var okUrl=L.url && /^https?:\/\//.test(L.url), dd=diasDesde(L.posted_at), q=qid(L.lead);
+  return '<div class="card"><div class="tap" onclick="openLead('+q+')"><div class="name" style="white-space:normal">'+esc(L.title||'Anúncio sem título')+'</div>'+
+     '<div class="sub">'+(L.price?esc(Number(L.price).toLocaleString('pt-PT'))+' € · ':'')+esc(loc)+'</div>'+
+     (L.tm&&L.tm.motivo?'<div class="note" style="margin:2px 0 4px">'+esc(L.tm.motivo)+'</div>':'')+
+     '<div>'+tmTag(L)+'<span class="tag">'+esc(portal(L))+'</span>'+olxMkt(L)+(L.negocio?'<span class="tag">'+esc(L.negocio)+'</span>':'')+
+     (dd!==null&&!(L.tm)?'<span class="tag">há '+dd+(dd===1?' dia':' dias')+'</span>':'')+
+     (L.republicado?'<span class="tag blue">Republicado</span>':'')+
+     (L.sem_imobiliarias?'<span class="tag red">Dispensa agências</span>':'')+
+     (L.stage!=='novo'&&L.next?'<span class="tag blue">Retomar '+esc(fmtDia(L.next))+'</span>':'')+
+     (L.is_active===false?'<span class="tag red">Inativo</span>':'')+'</div></div>'+
+     '<div class="btns" style="margin-top:10px"><button class="btn gold sm" onclick="contactLead('+q+')">💬 Contactar</button>'+
+     '<button class="btn ghost sm" onclick="registarLead('+q+')">📝 Registar</button>'+
+     (okUrl?'<a class="btn ghost sm" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="'+esc(L.url)+'">Ver anúncio</a>':'')+'</div>'+
+     '<div class="btns" style="margin-top:8px"><button class="btn ghost sm" onclick="dismissLead('+q+',\'nao_interessa\')">✕ Não interessa</button>'+
+     '<button class="btn ghost sm" onclick="dismissLead('+q+',\'agencia\')">🏢 É agência</button>'+
+     '<button class="btn ghost sm" onclick="convLead('+q+')">＋ Contacto</button></div></div>';
+}
+/* ---------- Momento certo, Os 10 de hoje, histórico de preço e registo rápido ---------- */
+function qid(id){ return "'"+esc(id)+"'"; }
+function tmOf(L){ return L.tm||{timing:0,motivo:''}; }
+function leadDue(L){ return L.stage!=='novo' && L.next && Date.parse(L.next)<=Date.now(); }
+function leadZona(L){ return (L.tm&&L.tm.med_zona) || L.freguesia || L.concelho || 'a sua zona'; }
+function tmTag(L){ var t=tmOf(L).timing||0; return '<span class="tag '+(t>=60?'red':(t>=40?'gold':''))+'">🎯 Momento '+t+'</span>'; }
+function top10(){
+  if(!olx) return [];
+  var out=[]; for(var i=0;i<olx.length;i++){ var L=olx[i]; if(L.stage==='novo' || leadDue(L)) out.push(L); }
+  out.sort(function(a,b){ return (tmOf(b).timing||0)-(tmOf(a).timing||0); });
+  return out.slice(0,10);
+}
+function argCache(){ var o=null; try{ o=JSON.parse(localStorage.getItem('crm_args')||'null'); }catch(e){} if(!o||o.d!==ymd(new Date())) o={d:ymd(new Date()), a:{}}; return o; }
+function argSave(o){ try{ localStorage.setItem('crm_args', JSON.stringify(o)); }catch(e){} }
+function argTemplate(L){
+  var tm=tmOf(L), z=leadZona(L), arr=/arrend|alug/i.test(L.negocio||'');
+  if(tm.descidas>0) return 'Vi que já ajustou o preço'+(tm.descidas>1?' '+tm.descidas+' vezes':'')+'. Tenho dados do que se está a vender em '+z+' que podem ajudar a decidir o próximo passo. Posso enviar-lhe sem compromisso?';
+  if(tm.dias>=60) return 'O seu anúncio está online há '+tm.dias+' dias. Posso mostrar-lhe, sem custos, o que se está a '+(arr?'arrendar':'vender')+' em '+z+' e porque alguns imóveis saem mais depressa?';
+  if(tm.pct>10) return 'Preparei uma comparação com os imóveis anunciados em '+z+'. Gostava de lha enviar sem compromisso, para confirmar se o preço está a atrair as visitas certas.';
+  return arr ? 'Tenho pessoas à procura de casa para arrendar em '+z+' e trato da triagem e do contrato. Faz sentido falarmos 5 minutos?' : 'Trabalho a zona de '+z+' e tenho compradores registados. Posso fazer-lhe uma avaliação gratuita e sem compromisso?';
+}
+function argDe(L){ var o=argCache(); return o.a[L.lead] || ''; }
+function fetchArgs(list, cb){
+  var o=argCache(), falta=[], i;
+  for(i=0;i<list.length;i++){ if(!o.a[list[i].lead]) falta.push(list[i]); }
+  if(!falta.length || !sess){ cb(); return; }
+  var itens=[]; for(i=0;i<falta.length;i++){ var L=falta[i]; itens.push({id:L.lead, titulo:L.title||'', preco:L.price||null, negocio:L.negocio||'', tipologia:L.tipologia||'', zona:leadZona(L), motivo:tmOf(L).motivo||''}); }
+  withToken(function(t){
+    if(!t){ cb(); return; }
+    xhr('POST', SB_URL+'/functions/v1/argumentos-ia', {apikey:SB_KEY, Authorization:'Bearer '+t, 'Content-Type':'application/json'}, JSON.stringify({itens:itens}), function(st,j){
+      var o2=argCache();
+      if(st===200 && j && j.args){ for(var k in j.args){ if(j.args.hasOwnProperty(k)) o2.a[k]=j.args[k]; } }
+      for(var m=0;m<falta.length;m++){ if(!o2.a[falta[m].lead]) o2.a[falta[m].lead]=argTemplate(falta[m]); }
+      argSave(o2); cb();
+    });
+  });
+}
+function dezHojeCard(){
+  if(!sess) return '';
+  if(olx===null){ if(!olxLoading) loadOlx(); return ''; }
+  var t=top10(); if(!t.length) return '';
+  var h='<h3>🎯 Os 10 de hoje</h3><div class="card"><div class="note" style="margin-bottom:8px">Os particulares com mais probabilidade de aceitar ajuda agora.</div>';
+  for(var i=0;i<Math.min(3,t.length);i++){
+    var L=t[i];
+    h+='<div class="row tap" style="padding:6px 0;border-top:'+(i?'1px solid var(--line)':'0')+'" onclick="openLead('+qid(L.lead)+')"><div class="grow"><div class="name" style="font-size:14.5px">'+(i+1)+'. '+esc(String(L.title||'Anúncio').substring(0,48))+'</div><div class="sub">'+esc(tmOf(L).motivo||'')+'</div></div><div class="when">'+(tmOf(L).timing||0)+'</div></div>';
+  }
+  return h+'<button class="btn gold full" style="margin-top:10px" onclick="open10()">Ver os '+t.length+' com argumento ›</button></div>';
+}
+function open10(){
+  var t=top10();
+  function draw(){
+    var h='<div class="sheet-h"><h2>Os 10 de hoje</h2><button class="x" onclick="closeModal()">×</button></div>';
+    h+='<div class="note" style="margin-bottom:10px">Ordenados pela nota “momento certo”: tempo anunciado, descidas de preço e preço face à zona.</div>';
+    for(var i=0;i<t.length;i++){
+      var L=t[i], a=argDe(L);
+      h+='<div class="card"><div class="row tap" onclick="openLead('+qid(L.lead)+')"><div class="grow"><div class="name" style="white-space:normal">'+(i+1)+'. '+esc(L.title||'Anúncio')+'</div>'+
+         '<div class="sub">'+(L.price?eur(L.price)+' · ':'')+esc(L.tipologia||'')+' '+esc(L.freguesia||L.concelho||'')+'</div></div><div class="when">'+(tmOf(L).timing||0)+'</div></div>'+
+         '<div class="note" style="margin:6px 0">'+esc(tmOf(L).motivo||'')+'</div>'+
+         '<div class="card note" style="margin:6px 0;background:var(--cream)">💡 '+(a?esc(a):'<i>A preparar argumento…</i>')+'</div>'+
+         '<div class="btns"><button class="btn gold sm" onclick="contactLead('+qid(L.lead)+')">💬 Contactar</button><button class="btn ghost sm" onclick="registarLead('+qid(L.lead)+')">📝 Registar</button></div></div>';
+    }
+    if(!t.length) h+='<div class="empty">Sem anúncios por tratar.</div>';
+    var sc=document.getElementById('sheet').scrollTop; openModal(h); document.getElementById('sheet').scrollTop=sc;
+  }
+  draw();
+  fetchArgs(t, function(){ if(modalAberto() && document.getElementById('sheet').innerHTML.indexOf('Os 10 de hoje')>-1) draw(); });
+}
+function openLead(leadId){
+  var i=findLead(leadId); if(i<0) return; var L=olx[i], tm=tmOf(L), q=qid(leadId), okUrl=L.url && /^https?:\/\//.test(L.url);
+  var h='<div class="sheet-h"><h2>Anúncio</h2><button class="x" onclick="closeModal()">×</button></div>';
+  h+='<div class="card"><div class="name" style="white-space:normal">'+esc(L.title||'Anúncio')+'</div><div class="sub" style="white-space:normal">'+(L.price?eur(L.price)+' · ':'')+esc([L.tipologia,L.area_m2?L.area_m2+' m²':'',L.freguesia,L.concelho].filter(function(x){return x;}).join(' · '))+'</div>'+
+     '<div><span class="tag">'+esc(portal(L))+'</span>'+(L.negocio?'<span class="tag">'+esc(L.negocio)+'</span>':'')+(L.sem_imobiliarias?'<span class="tag red">Dispensa agências</span>':'')+'</div></div>';
+  h+='<div class="card"><div class="row"><div class="grow"><b>🎯 Momento certo</b><div class="note">'+esc(tm.motivo||'')+'</div></div><div style="font-family:var(--fh);font-size:30px;font-weight:700">'+(tm.timing||0)+'</div></div></div>';
+  if(L.stage!=='novo') h+='<div class="card note">🔁 Em seguimento'+(L.next?' — retomar a '+esc(fmtDia(L.next)):'')+'</div>';
+  h+='<h3>Preço ao longo do tempo</h3><div class="card" id="lhist"><div class="spin">A carregar…</div></div>';
+  h+='<h3>Argumento de abertura</h3><div class="card note" id="larg">'+(argDe(L)?'💡 '+esc(argDe(L)):'<i>A preparar…</i>')+'</div>';
+  h+='<div id="latt"></div>';
+  h+='<div class="btns" style="margin-top:10px"><button class="btn gold" onclick="contactLead('+q+')">💬 Contactar</button>'+(okUrl?'<a class="btn ghost" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="'+esc(L.url)+'">Ver anúncio</a>':'')+'</div>';
+  h+='<button class="btn full" style="margin-top:8px" onclick="registarLead('+q+')">📝 Registar contacto / resultado</button>';
+  h+='<div class="btns" style="margin-top:8px"><button class="btn ghost sm" onclick="closeModal();dismissLead('+q+',\'nao_interessa\')">✕ Não interessa</button><button class="btn ghost sm" onclick="closeModal();dismissLead('+q+',\'agencia\')">🏢 É agência</button><button class="btn ghost sm" onclick="convLead('+q+')">＋ Contacto</button></div>';
+  openModal(h);
+  loadHist(L);
+  if(!argDe(L)) fetchArgs([L], function(){ var e=document.getElementById('larg'); if(e) e.innerHTML='💡 '+esc(argDe(L)||argTemplate(L)); });
+  rest('GET','/rest/v1/contact_attempts?lead_id=eq.'+encodeURIComponent(leadId)+'&select=channel,outcome,notes,at&order=at.desc&limit=10',null,null,function(st,rows){
+    var e=document.getElementById('latt'); if(!e || st!==200 || !rows || !rows.length) return;
+    var x='<h3>Contactos feitos</h3><div class="card">';
+    for(var k=0;k<rows.length;k++){ var r=rows[k]; x+='<div style="padding:4px 0;border-top:'+(k?'1px solid var(--line)':'0')+'"><b>'+esc(OUTC[r.outcome]||r.outcome||'')+'</b> · '+esc(r.channel||'')+' · '+esc(fmtDia(r.at))+(r.notes?'<div class="note">'+esc(r.notes)+'</div>':'')+'</div>'; }
+    e.innerHTML=x+'</div>';
+  });
+}
+function fmtDia(iso){ var d=new Date(iso); if(isNaN(d)) return ''; return d.getDate()+' '+MESES[d.getMonth()]; }
+function loadHist(L){
+  rest('GET','/rest/v1/price_history?listing_id=eq.'+encodeURIComponent(L.id)+'&price=gt.0&select=price,seen_at&order=seen_at.asc&limit=200',null,null,function(st,rows){
+    var e=document.getElementById('lhist'); if(!e) return;
+    if(st!==200 || !rows){ e.innerHTML='<div class="note">Não foi possível carregar o histórico.</div>'; return; }
+    var pts=[], i;
+    for(i=0;i<rows.length;i++){ var p=Number(rows[i].price); if(!pts.length || pts[pts.length-1].p!==p) pts.push({p:p, t:Date.parse(rows[i].seen_at)}); }
+    if(!pts.length && L.price) pts.push({p:Number(L.price), t:Date.parse(L.first_seen_at)||Date.now()});
+    if(!pts.length){ e.innerHTML='<div class="note">Sem histórico de preço.</div>'; return; }
+    var tm=tmOf(L), mp=(tm.med && Number(L.area_m2)>=20) ? tm.med*Number(L.area_m2) : null;
+    e.innerHTML=histSvg(pts, mp)+'<div class="note" style="margin-top:6px">'+
+      (pts.length>1 ? 'Mudou de preço '+(pts.length-1)+(pts.length===2?' vez':' vezes')+' desde '+fmtDia(new Date(pts[0].t).toISOString())+'.' : 'Preço sem alterações desde que a app o segue ('+fmtDia(new Date(pts[0].t).toISOString())+').')+
+      (mp?' A linha tracejada é o preço que este imóvel teria à mediana de '+esc(tm.med_zona||'zona')+' ('+eurm2(tm.med)+').':'')+'</div>';
+  });
+}
+function histSvg(pts, mp){
+  var W=320, H=150, L0=10, R0=10, T0=20, B0=24, now=Date.now();
+  var t0=pts[0].t, t1=Math.max(now, pts[pts.length-1].t+1); if(t1-t0<86400000) t0=t1-86400000;
+  var lo=Infinity, hi=-Infinity, i;
+  for(i=0;i<pts.length;i++){ lo=Math.min(lo,pts[i].p); hi=Math.max(hi,pts[i].p); }
+  if(mp){ lo=Math.min(lo,mp); hi=Math.max(hi,mp); }
+  var pad=(hi-lo)*0.15 || hi*0.05 || 1; lo-=pad; hi+=pad;
+  function X(t){ return L0+(t-t0)/(t1-t0)*(W-L0-R0); }
+  function Y(p){ return T0+(hi-p)/(hi-lo)*(H-T0-B0); }
+  function k(n){ return n>=1000?Math.round(n/1000).toLocaleString('pt-PT')+' mil €':Math.round(n)+' €'; }
+  var d='M'+X(pts[0].t).toFixed(1)+','+Y(pts[0].p).toFixed(1);
+  for(i=1;i<pts.length;i++) d+=' H'+X(pts[i].t).toFixed(1)+' V'+Y(pts[i].p).toFixed(1);
+  d+=' H'+X(t1).toFixed(1);
+  var s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="display:block" role="img" aria-label="Histórico de preço">';
+  s+='<line x1="'+L0+'" x2="'+(W-R0)+'" y1="'+(H-B0)+'" y2="'+(H-B0)+'" stroke="var(--line)" stroke-width="1"/>';
+  if(mp){ var ym=Y(mp).toFixed(1); s+='<line x1="'+L0+'" x2="'+(W-R0)+'" y1="'+ym+'" y2="'+ym+'" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/><text x="'+L0+'" y="'+(Number(ym)-5)+'" font-size="10.5" fill="var(--muted)">Mediana da zona ≈ '+k(mp)+'</text>'; }
+  s+='<path d="'+d+'" fill="none" stroke="var(--gold)" stroke-width="2.5" stroke-linejoin="round"/>';
+  for(i=0;i<pts.length;i++) s+='<circle cx="'+X(pts[i].t).toFixed(1)+'" cy="'+Y(pts[i].p).toFixed(1)+'" r="4" fill="var(--gold)" stroke="var(--card)" stroke-width="2"/>';
+  var last=pts[pts.length-1];
+  s+='<text x="'+(W-R0)+'" y="'+(Y(last.p)-8).toFixed(1)+'" font-size="12" font-weight="700" text-anchor="end" fill="var(--ink)">'+k(last.p)+'</text>';
+  if(pts.length>1) s+='<text x="'+(X(pts[0].t)+2).toFixed(1)+'" y="'+(Y(pts[0].p)-8).toFixed(1)+'" font-size="11" fill="var(--muted)">'+k(pts[0].p)+'</text>';
+  s+='<text x="'+L0+'" y="'+(H-6)+'" font-size="10.5" fill="var(--muted)">'+fmtDia(new Date(t0).toISOString())+'</text><text x="'+(W-R0)+'" y="'+(H-6)+'" font-size="10.5" text-anchor="end" fill="var(--muted)">hoje</text>';
+  return s+'</svg>';
+}
+var OUTC={enviada:'Mensagem enviada', sem_resposta:'Sem resposta / não atendeu', mais_tarde:'Pediu para falar mais tarde', interessado:'Interessado', nao_quer_agencia:'Não quer agência', ja_vendeu:'Já vendeu / arrendou'};
+var logCanal='Mensagem no portal', pendingLog=null;
+function registarLead(leadId){
+  var i=findLead(leadId); if(i<0) return; var L=olx[i], q=qid(leadId), d7=new Date(); d7.setDate(d7.getDate()+7);
+  var h='<div class="sheet-h"><h2>Registar contacto</h2><button class="x" onclick="closeModal()">×</button></div>';
+  h+='<div class="card"><b>'+esc(L.title||'Anúncio')+'</b><div class="sub">'+(L.price?eur(L.price)+' · ':'')+esc(L.freguesia||L.concelho||'')+'</div></div>';
+  h+='<label>Como foi o contacto</label><div class="chips" id="lcan">';
+  var cs=['Mensagem no portal','Chamada','WhatsApp'];
+  for(var k=0;k<cs.length;k++) h+='<button class="chip '+(logCanal===cs[k]?'on':'')+'" onclick="logCanal=\''+cs[k]+'\';var b=this.parentNode.children;for(var j=0;j<b.length;j++)b[j].className=\'chip\';this.className=\'chip on\'">'+cs[k]+'</button>';
+  h+='</div><label>Nota (opcional)</label><input id="lnota" maxlength="300" placeholder="Ex.: disse que tem visitas no sábado">';
+  h+='<label>Telemóvel do proprietário (se conseguiu)</label><input id="ltel" type="tel" inputmode="tel" value="'+esc(L.phone||'')+'">';
+  h+='<h3>Resultado</h3>';
+  h+='<button class="btn full" onclick="logLead('+q+',\'enviada\')">📨 Mensagem enviada — retomar em 3 dias</button>';
+  h+='<button class="btn ghost full" style="margin-top:8px" onclick="logLead('+q+',\'sem_resposta\')">📵 Sem resposta / não atendeu — tentar em 2 dias</button>';
+  h+='<div class="card" style="margin-top:8px"><div class="row"><div class="grow"><b>🔁 Falar mais tarde</b><div class="note">Pediu para voltar a contactar</div></div><input id="ldata" type="date" value="'+ymd(d7)+'" style="width:auto"></div><button class="btn ghost full" style="margin-top:8px" onclick="logLead('+q+',\'mais_tarde\')">Marcar para esse dia</button></div>';
+  h+='<button class="btn gold full" style="margin-top:8px" onclick="logLead('+q+',\'interessado\')">🙂 Interessado — criar contacto no CRM</button>';
+  h+='<div class="btns" style="margin-top:8px"><button class="btn ghost sm" onclick="logLead('+q+',\'nao_quer_agencia\')">🙅 Não quer agência</button><button class="btn ghost sm" onclick="logLead('+q+',\'ja_vendeu\')">✅ Já vendeu / arrendou</button></div>';
+  openModal(h);
+}
+function logLead(leadId, outc){
+  var i=findLead(leadId); if(i<0) return; var L=olx[i];
+  var nota=(document.getElementById('lnota')||{}).value||'', tel=((document.getElementById('ltel')||{}).value||'').replace(/[^0-9+ ]/g,'').trim();
+  var dt=(document.getElementById('ldata')||{}).value||'', pat={}, nx=new Date();
+  if(outc==='enviada'){ nx.setDate(nx.getDate()+3); pat={stage:'contactado', next_action_at:nx.toISOString()}; }
+  else if(outc==='sem_resposta'){ nx.setDate(nx.getDate()+2); pat={stage:'contactado', next_action_at:nx.toISOString()}; }
+  else if(outc==='mais_tarde'){ var dd=dDate(dt); if(!dd){ toast('Escolha o dia'); return; } dd.setHours(9,0,0,0); pat={stage:'contactado', next_action_at:dd.toISOString()}; }
+  else if(outc==='nao_quer_agencia' || outc==='ja_vendeu'){ pat={stage:'perdido', lost_reason:outc, next_action_at:null}; }
+  if(tel) pat.phone=tel;
+  rest('POST','/rest/v1/contact_attempts', JSON.stringify({lead_id:leadId, channel:logCanal, outcome:outc, notes:nota||null}), 'return=minimal', function(){});
+  if(outc==='interessado'){
+    if(tel) rest('PATCH','/rest/v1/leads?id=eq.'+encodeURIComponent(leadId), JSON.stringify({phone:tel}), 'return=minimal', function(){});
+    closeModal(); convLead(leadId, true);
+    setTimeout(function(){ var t=document.getElementById('ftel')||document.querySelector('#sheet input[type=tel]'); if(t && tel && !t.value) t.value=tel; var n=document.getElementById('fnotas')||document.querySelector('#sheet textarea'); if(n && nota) n.value=(n.value?n.value+'\n':'')+nota; }, 80);
+    return;
+  }
+  rest('PATCH','/rest/v1/leads?id=eq.'+encodeURIComponent(leadId), JSON.stringify(pat), 'return=minimal', function(st){
+    if(st<200||st>=300){ toast('Não foi possível guardar — tente de novo'); return; }
+    var j=findLead(leadId);
+    if(j>-1){ if(pat.stage==='perdido') olx.splice(j,1); else { olx[j].stage=pat.stage; olx[j].next=pat.next_action_at; if(tel) olx[j].phone=tel; } }
+    closeModal(); render();
+    toast(pat.stage==='perdido'?'Registado e arquivado':'Registado — retomar a '+fmtDia(pat.next_action_at));
+  });
+}
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden || !pendingLog) return;
+  var p=pendingLog; if(Date.now()-p.t<4000) return;
+  pendingLog=null;
+  if(Date.now()-p.t<3*3600000) setTimeout(function(){ registarLead(p.lead); }, 400);
+});
+
 function dismissLead(leadId, motivo){
   var i=findLead(leadId); if(i<0) return;
   var L=olx[i]; olx.splice(i,1); lastDis={L:L, idx:i, motivo:motivo}; render();
@@ -999,7 +1193,8 @@ function contactLead(leadId){
   h+='<label>Mensagem (pode editar)</label><textarea id="otxt" style="min-height:190px">'+esc(leadMsg(L))+'</textarea>';
   h+='<button class="btn gold full" style="margin-top:10px" onclick="copyOpen('+q+')">📋 Copiar mensagem e abrir anúncio</button>';
   h+='<div class="note" style="margin:8px 0 14px">No anúncio, toque em “Enviar mensagem” e cole o texto.</div>';
-  h+='<button class="btn full" onclick="convLead('+q+',true)">✓ Já enviei → guardar contacto e follow-up</button>';
+  h+='<button class="btn full" onclick="registarLead('+q+')">📝 Registar resultado do contacto</button>';
+  if(argDe(L)) h=h.replace('<div id="olxarg"></div>','<div class="card note" style="background:var(--cream)">💡 <b>Argumento:</b> '+esc(argDe(L))+'</div><div id="olxarg"></div>');
   openModal(h);
   var e=L.price&&Number(L.area_m2)>=20?Number(L.price)/Number(L.area_m2):null, tip=tipFromStr(L.tipologia);
   if(e && L.freguesia) getMkt(L.freguesia, tip, negKey(L.negocio), function(d){
@@ -1018,6 +1213,7 @@ function copyEl(id){
 function copyOpen(leadId){
   var i=findLead(leadId); if(i<0) return; var L=olx[i];
   var ok=copyEl('otxt'); toast(ok?'Mensagem copiada':'Copie o texto manualmente');
+  pendingLog={lead:leadId, t:Date.now()};
   if(L.url && /^https?:\/\//.test(L.url)) window.open(L.url,'_blank');
 }
 function convLead(leadId, contactado){
@@ -1031,7 +1227,7 @@ function convLead(leadId, contactado){
     interesse:L.title||'', orcamento:L.price||'', notas:(L.url||'')+(contactado?'\nMensagem enviada pelo '+portal(L)+'.':'')});
 }
 function markLead(leadId){
-  rest('PATCH','/rest/v1/leads?id=eq.'+encodeURIComponent(leadId),JSON.stringify({stage:'contactado'}),'return=minimal',function(){});
+  rest('PATCH','/rest/v1/leads?id=eq.'+encodeURIComponent(leadId),JSON.stringify({stage:'qualificado',next_action_at:null}),'return=minimal',function(){});
   if(olx){ for(var i=0;i<olx.length;i++){ if(olx[i].lead===leadId){ olx.splice(i,1); break; } } }
 }
 
