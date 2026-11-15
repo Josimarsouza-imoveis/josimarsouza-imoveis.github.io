@@ -695,7 +695,7 @@ function gcal(cid, aid){
     '&ctz=Europe/Lisbon'+
     '&details='+encodeURIComponent(evDesc(c,a))+
     (c.zona&&c.zona!=='Outra'?'&location='+encodeURIComponent(c.zona):'');
-  window.open(url,'_blank');
+  abrirExt(url);
 }
 function icsEsc(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n'); }
 function ics(cid, aid){
@@ -718,7 +718,7 @@ function openCalendarMenu(){
   openModal(h);
 }
 function openCal(which){
-  if(which==='google'){ window.open('https://calendar.google.com/calendar/r/day','_blank'); return; }
+  if(which==='google'){ abrirExt('https://calendar.google.com/calendar/r/day'); return; }
   var ref=new Date(2001,0,1).getTime(); // calshow usa segundos desde 1/1/2001
   window.location.href='calshow:'+Math.floor((Date.now()-ref)/1000);
 }
@@ -1214,7 +1214,7 @@ function copyOpen(leadId){
   var i=findLead(leadId); if(i<0) return; var L=olx[i];
   var ok=copyEl('otxt'); toast(ok?'Mensagem copiada':'Copie o texto manualmente');
   pendingLog={lead:leadId, t:Date.now()};
-  if(L.url && /^https?:\/\//.test(L.url)) window.open(L.url,'_blank');
+  if(L.url && /^https?:\/\//.test(L.url)) abrirExt(L.url);
 }
 function convLead(leadId, contactado){
   var i=findLead(leadId); if(i<0) return; var L=olx[i], k;
@@ -1645,7 +1645,7 @@ function propor(cid, imvId, from){
 function waSend(cid, label){
   var c=byId(cid), e=document.getElementById('mtxt'); if(!c||!e) return;
   var txt=e.value.replace(/^\s+|\s+$/g,''); if(!txt){ toast('Mensagem vazia'); return; }
-  window.open('https://wa.me/'+(telNorm(c.tel)||'')+'?text='+encodeURIComponent(txt),'_blank');
+  abrirExt('https://wa.me/'+(telNorm(c.tel)||'')+'?text='+encodeURIComponent(txt));
   c.hist=c.hist||[]; c.hist.push({d:nowLocal(), canal:'WhatsApp', txt:label}); save(c);
 }
 function visRow(c, vv, from, backId){
@@ -2465,7 +2465,7 @@ function sendWa(cid, tid){
   var txt=e.value.replace(/^\s+|\s+$/g,''); if(!txt){ toast('Mensagem vazia'); return; }
   var nome='', i; for(i=0;i<TPLS.length;i++){ if(TPLS[i].id===tid) nome=TPLS[i].t; }
   var w=telNorm(c.tel);
-  window.open('https://wa.me/'+(w||'')+'?text='+encodeURIComponent(txt),'_blank');
+  abrirExt('https://wa.me/'+(w||'')+'?text='+encodeURIComponent(txt));
   c.hist=c.hist||[]; c.hist.push({d:nowLocal(), canal:'WhatsApp', txt:'Mensagem enviada: '+nome});
   save(c); openContact(cid);
 }
@@ -2496,7 +2496,7 @@ function openWaMenu(cid){
   h+='<div class="note" style="margin-bottom:10px">'+esc(c.nome)+(c.tel?' · '+esc(c.tel):' · sem telemóvel')+'</div>';
   h+='<button class="btn gold full" onclick="openWaChat('+q+')">🤖 Analisar conversa com IA<br><span style="font-weight:400;font-size:12.5px">carregar exportação ou colar texto</span></button>';
   h+='<button class="btn full" style="margin-top:8px" onclick="openMsgs('+q+')">✍️ Mensagens prontas</button>';
-  h+='<button class="btn ghost full" style="margin-top:8px" onclick="'+(w?'window.open(\'https://wa.me/'+w+'\',\'_blank\')':'toast(\'Sem telemóvel\')')+'">Abrir conversa no WhatsApp</button>';
+  h+='<button class="btn ghost full" style="margin-top:8px" onclick="'+(w?'abrirExt(\'https://wa.me/'+w+'\')':'toast(\'Sem telemóvel\')')+'">Abrir conversa no WhatsApp</button>';
   openModal(h);
 }
 function pasteChat(cid){
@@ -2755,6 +2755,23 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message', function(e){ if(e.data && e.data.abrir) abrirLink(e.data.abrir); });
 }
 
+/* Links externos: na app instalada no iPhone, abrir no Safari/app em vez do mini-navegador (que fica em branco ao voltar) */
+function ehStandaloneIOS(){ return ehIOS() && ehInstalada(); }
+function abrirExt(url){
+  if(ehStandaloneIOS() && /^https:\/\//.test(url)){
+    var m=url.match(/^https:\/\/wa\.me\/(\d*)\/?\??(.*)$/);
+    if(m){ location.href='whatsapp://send?'+(m[1]?'phone='+m[1]+(m[2]?'&':''):'')+m[2]; return; }
+    location.href='x-safari-'+url; return;
+  }
+  window.open(url,'_blank');
+}
+document.addEventListener('click', function(e){
+  if(!ehStandaloneIOS()) return;
+  var a=e.target; while(a && a.tagName!=='A') a=a.parentNode;
+  if(!a || a.getAttribute('target')!=='_blank') return;
+  var h=a.getAttribute('href')||''; if(!/^https:\/\//.test(h)) return;
+  e.preventDefault(); abrirExt(h);
+}, true);
 render();
 setCloud(sess?'ok':'');
 if(sess) sync(false);
