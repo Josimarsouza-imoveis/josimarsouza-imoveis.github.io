@@ -437,6 +437,35 @@ function saveManual(soAdd){
     if(st>=200&&st<300){ toast(soAdd?'Aprendizagem acrescentada':'Manual guardado'); openManual(); } else toast('Não foi possível guardar');
   });
 }
+var custos=null, custosT=0;
+function custosLoad(){
+  if(!sess || Date.now()-custosT<60000) return; custosT=Date.now();
+  rest('POST','/rest/v1/rpc/custos_buscas','{}',null,function(st,j){ if(st===200 && j){ custos=j; var e=document.getElementById('cbox'); if(e) e.innerHTML=custosHtml(); } });
+}
+function custosHtml(){
+  custosLoad();
+  var c=custos; if(!c) return '<div class="spin">A carregar…</div>';
+  var usd=Number(c.usd||0), inc=Number(c.incluido_usd||0), orc=c.orcamento_usd!=null?Number(c.orcamento_usd):null;
+  var fim=c.ciclo_fim?new Date(c.ciclo_fim):null, pausa=c.pausa&&c.pausa!=='0';
+  var extra=inc&&usd>inc?usd-inc:0;
+  var h='<div class="row"><div class="grow"><b>Gasto este mês: '+usd.toFixed(2)+' $</b><div class="note">Plano '+esc(c.plano||'?')+(inc?' · inclui '+inc.toFixed(0)+' $':'')+(fim?' · renova a '+fim.getDate()+' '+MESES[fim.getMonth()]:'')+'</div></div>'+
+    '<span class="tag '+(pausa?'red':'green')+'">'+(pausa?'⏸️ Pausadas':'▶️ Ativas')+'</span></div>';
+  if(c.gasto_24h!=null) h+='<div class="note" style="margin-top:4px">Últimas 24 h: '+Number(c.gasto_24h).toFixed(2)+' $</div>';
+  if(inc){ var pct=Math.min(100,Math.round(100*usd/inc)); h+='<div style="height:8px;border-radius:4px;background:var(--line);margin:8px 0 4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+(pct>=90?'var(--red)':'var(--gold)')+'"></div></div><div class="note">'+pct+'% do valor incluído no plano'+(extra?' · <b>'+extra.toFixed(2)+' $ a mais</b> (cobrados na próxima fatura)':'')+'</div>';}
+  if(c.pausa==='auto') h+='<div class="card note" style="margin-top:8px;border-color:var(--redline);color:var(--red)">Pausadas automaticamente: o gasto chegou ao seu orçamento.</div>';
+  h+='<label>Orçamento máximo do mês ($)</label><div class="row"><input id="corc" type="number" inputmode="decimal" min="0" step="1" value="'+(orc!=null?orc:'')+'" placeholder="ex.: 25" style="flex:1"><button class="btn sm" style="margin-left:8px" onclick="setCfgIA(\'orcamento_usd\', document.getElementById(\'corc\').value)">Guardar</button></div>';
+  h+='<div class="note" style="margin-top:4px">Ao chegar a este valor, as buscas param sozinhas e recebe um aviso.</div>';
+  h+='<button class="btn '+(pausa?'gold':'ghost')+' full" style="margin-top:10px" onclick="setCfgIA(\'buscas_pausa\', \''+(pausa?'0':'1')+'\')">'+(pausa?'▶️ Retomar buscas':'⏸️ Pausar buscas')+'</button>';
+  h+='<div class="note" style="margin-top:8px">Valores do Apify, atualizados às 6:50 e às 21:50.</div>';
+  return h;
+}
+function setCfgIA(k, val){
+  val=String(val==null?'':val).trim();
+  rest('POST','/rest/v1/crm_ia_cfg?on_conflict=k', JSON.stringify({k:k, v:val, updated_at:new Date().toISOString()}), 'resolution=merge-duplicates,return=minimal', function(st){
+    if(st>=200&&st<300){ toast(k==='buscas_pausa'?(val==='0'?'Buscas retomadas':'Buscas pausadas'):'Orçamento guardado'); custosT=0; custos=null; render(); }
+    else toast('Não foi possível guardar');
+  });
+}
 function vMais(){
   var n=db.contacts.length, f=0, p=0;
   for(var i=0;i<n;i++){ if(db.contacts[i].estado==='Angariado / Fechado') f++; if(db.contacts[i].estado==='Perdido') p++; }
@@ -456,6 +485,7 @@ function vMais(){
   h+='</div>';
   if(sess) h+=pushCard();
   h+='<h3>Angariação</h3><div class="card"><button class="btn full" onclick="go(\'olx\')">🏠 Leads de anúncios</button><button class="btn ghost full" style="margin-top:8px" onclick="go(\'ang\')">📄 Contratos e comissões</button><button class="btn ghost full" style="margin-top:8px" onclick="numMes=0;go(\'num\')">📈 Números do mês</button><button class="btn ghost full" style="margin-top:8px" onclick="go(\'mercado\')">📊 Mercado da zona</button><button class="btn ghost full" style="margin-top:8px" onclick="radarSel=0;go(\'radar\')">📡 Radar semanal</button></div>';
+  if(sess) h+='<h3>Buscas de anúncios</h3><div class="card" id="cbox">'+custosHtml()+'</div>';
   if(sess) h+='<h3>Inteligência artificial</h3><div class="card"><button class="btn full" onclick="openManual()">🧠 Manual de vendas da IA</button><div class="note" style="margin-top:8px">As técnicas de persuasão que a IA aplica nas mensagens, argumentos e conselhos. Pode acrescentar ou mudar.</div></div>';
   h+='<h3>Captar clientes</h3><div class="card"><button class="btn gold full" onclick="openCaptar()">📝 Formulário “Diga-me o que procura”</button><div class="note" style="margin-top:8px">Link e código QR para o Instagram, WhatsApp e cartas. Os pedidos entram aqui sozinhos.</div></div>';
   h+='<h3>Alertas de acompanhamento</h3><div class="card">'+
