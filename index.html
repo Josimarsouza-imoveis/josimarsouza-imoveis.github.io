@@ -178,7 +178,7 @@ var ORIGENS = ['OLX','Idealista','Imovirtual','CustoJusto','Casa Sapo','Supercas
 var ESTADOS = ['Novo','Contactado','Qualificado','Reunião / Visita marcada','Avaliação / Proposta','Angariado / Fechado','Nutrir','Perdido'];
 var FECHADOS = ['Angariado / Fechado','Perdido'];
 var ACOES = ['Ligar','WhatsApp','Visita','Reunião de angariação','Avaliação do imóvel','Enviar imóveis','Follow-up','Assinatura CMI / CPCV','Escritura'];
-var ZONAS = ['Alfragide','Amadora','Oeiras','Queluz','Prior Velho','Cascais','Lisboa','Outra'];
+var ZONAS = ['Alfragide','Amadora','Oeiras','Carnaxide','Queluz','Sintra','Loures','Prior Velho','Cascais','Lisboa','Outra'];
 
 var TEMAS=[['premium','Premium · grafite e champanhe','#14161B'],['classico','Clássico · azul e dourado','#0E1A2C'],['marca','Marca · carvão e vermelho','#232428']];
 function temaAtual(){ var t='premium'; try{ t=localStorage.getItem('crm_theme')||'premium'; }catch(e){} return t; }
@@ -1113,6 +1113,7 @@ function openLead(leadId){
   h+='<div id="latt"></div>';
   h+='<div class="btns" style="margin-top:10px"><button class="btn gold" onclick="contactLead('+q+')">💬 Contactar</button>'+(okUrl?'<a class="btn ghost" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="'+esc(L.url)+'">Ver anúncio</a>':'')+'</div>';
   h+='<button class="btn full" style="margin-top:8px" onclick="registarLead('+q+')">📝 Registar contacto / resultado</button>';
+  h+='<button class="btn ghost full" style="margin-top:8px" onclick="analisarLead('+q+')">🔎 Análise completa (nota 0–100)</button>';
   h+='<div class="btns" style="margin-top:8px"><button class="btn ghost sm" onclick="closeModal();dismissLead('+q+',\'nao_interessa\')">✕ Não interessa</button><button class="btn ghost sm" onclick="closeModal();dismissLead('+q+',\'agencia\')">🏢 É agência</button><button class="btn ghost sm" onclick="convLead('+q+')">＋ Contacto</button></div>';
   openModal(h);
   loadHist(L);
@@ -1467,7 +1468,7 @@ function imoveisPara(c){ var out=[], i, r; for(i=0;i<db.imoveis.length;i++){ r=m
 function isClosedBuyer(c){ return c.estado==='Perdido' || c.estado==='Angariado / Fechado'; }
 /* --- lista --- */
 function vImoveis(){
-  var h='<h2>Imóveis</h2><button class="btn ghost sm full" style="margin-bottom:10px" onclick="go(\'mercado\')">📊 Ver mercado da zona</button>';
+  var h='<h2>Imóveis</h2><button class="btn ghost sm full" style="margin-bottom:10px" onclick="go(\'mercado\')">📊 Ver mercado da zona</button><button class="btn gold sm full" style="margin-bottom:10px" onclick="openAnaliseLink()">🔎 Analisar um anúncio (link)</button>';
   h+='<input class="search" placeholder="Pesquisar título, zona, agência…" value="'+esc(imvF.q)+'" oninput="imvF.q=this.value;var e=document.getElementById(\'ilista\');if(e)e.innerHTML=imvLista()">';
   h+='<div class="chips">'; var es=['Todos'].concat(IMV_EST), i;
   for(i=0;i<es.length;i++) h+='<button class="chip '+(imvF.est===es[i]?'on':'')+'" onclick="imvF.est=\''+es[i]+'\';render()">'+esc(es[i])+'</button>';
@@ -1495,6 +1496,214 @@ function imvLista(){
   var h=''; for(i=0;i<out.length;i++) h+=imvCard(out[i]); return h;
 }
 /* --- ficha do imóvel --- */
+/* ================= ANÁLISE DE IMÓVEL (nota 0-100) ================= */
+var anaCur=null, anaIA={};
+function anaPick(d){ return d && (d.tip&&d.tip.n>=3 ? d.tip : (d.todas&&d.todas.n>=3 ? d.todas : null)); }
+function anaGrade(n){
+  if(n>=85) return ['A+','Oportunidade forte','green'];
+  if(n>=70) return ['A','Bom negócio / preço justo','green'];
+  if(n>=55) return ['B','Razoável — negociar ou confirmar dados','gold'];
+  if(n>=40) return ['C','Cuidado — preço ou procura fracos','red'];
+  if(n>=25) return ['D','Mau negócio ao preço atual','red'];
+  return ['F','Evitar','red'];
+}
+function r5k(x){ return Math.round(x/5000)*5000; }
+function anaCalc(m, dV, dA){
+  var A={m:m, area:Number(m.area)||0, preco:Number(m.preco)||0, arr:m.negocio==='Arrendamento'}, b=anaPick(dV), ex=m.extras||[];
+  A.b=b; A.comps=(dV&&dV.comps)||[]; A.usaTip=!!(b&&dV&&b===dV.tip);
+  A.eur=A.preco&&A.area>=20?A.preco/A.area:null;
+  // 1) Valor
+  if(b && b.eur_m2 && A.eur){
+    A.pct=Math.round(100*(A.eur-b.eur_m2)/b.eur_m2);
+    var adj=1+(ex.indexOf('Garagem')>-1?0.03:0)+(ex.indexOf('Elevador')>-1?0.02:0)+(ex.indexOf('Varanda / terraço')>-1?0.02:0)+(ex.indexOf('Jardim')>-1||ex.indexOf('Piscina')>-1?0.03:0)+(ex.indexOf('Remodelado')>-1?0.04:0);
+    A.adj=adj;
+    var lo=(A.usaTip&&b.p25?b.p25:b.eur_m2*0.93)*A.area*adj, hi=(A.usaTip&&b.p75?b.p75:b.eur_m2*1.07)*A.area*adj;
+    A.lo=A.arr?Math.round(lo/10)*10:r5k(lo); A.hi=A.arr?Math.round(hi/10)*10:r5k(hi);
+    A.rec=A.arr?Math.round(b.eur_m2*A.area*adj/10)*10:r5k(b.eur_m2*A.area*adj);
+    var p=A.pct; A.nV=p<=-15?92:(p<=-5?82:(p<=5?72:(p<=10?60:(p<=20?45:(p<=30?32:22)))));
+  }
+  // 2) Renda (só para venda)
+  var rb=anaPick(dA);
+  if(!A.arr && rb && rb.eur_m2 && A.area>=20 && A.preco){
+    A.renda=Math.round(rb.eur_m2*A.area/10)*10; A.rendaN=rb.n;
+    A.yb=Math.round(1000*A.renda*12/A.preco)/10;
+    A.nR=A.yb>=6?85:(A.yb>=5?75:(A.yb>=4?60:(A.yb>=3?45:30)));
+  }
+  // 3) Mercado da zona
+  if(b){
+    var dias=Number(b.dias)||0, dr=b.n?(Number(b.descidas)||0)/b.n:0, nm=60;
+    nm+=dias&&dias<60?15:(dias>150?-15:(dias>100?-8:0));
+    nm-=dr>0.3?10:(dr>0.15?5:0); nm-=b.n>60?5:0;
+    A.nM=Math.max(15,Math.min(90,nm)); A.dias=dias; A.descPct=Math.round(dr*100); A.oferta=b.n;
+    if(dias) A.tVenda=Math.round(dias*(A.pct>15?1.6:(A.pct>5?1.25:(A.pct<-5?0.8:1))));
+  }
+  // 4) Procura no CRM
+  var mm={}; for(var k in m){ if(m.hasOwnProperty(k)) mm[k]=m[k]; } mm.estado='Disponível'; if(!mm.id) mm.id='__ana';
+  A.cp=compradoresPara(mm); var nc=A.cp.length;
+  A.nP=nc===0?30:(nc===1?55:(nc<=3?70:85));
+  // Nota final
+  var parts=[['Valor face à zona',A.nV,A.nR!=null?0.35:0.45],['Renda / rentabilidade',A.nR,0.25],['Mercado da zona',A.nM,A.nR!=null?0.25:0.35],['Procura no seu CRM',A.nP,A.nR!=null?0.15:0.20]];
+  var s=0, w=0; A.parts=[];
+  for(var i=0;i<parts.length;i++){ if(parts[i][1]==null) continue; A.parts.push(parts[i]); s+=parts[i][1]*parts[i][2]; w+=parts[i][2]; }
+  A.ok=A.nV!=null; A.nota=w?Math.round(s/w):null; A.g=A.nota!=null?anaGrade(A.nota):null;
+  return A;
+}
+function anaResumoIA(A){
+  var m=A.m;
+  return {imovel:{titulo:m.titulo||'', negocio:m.negocio, tipologia:tipol(m), area_m2:A.area, preco:A.preco, eur_m2:A.eur?Math.round(A.eur):null, zona:A.zq, extras:m.extras||[]},
+    nota:A.nota, classe:A.g?A.g[0]+' — '+A.g[1]:null, notas:A.parts.map(function(p){ return p[0]+': '+p[1]; }),
+    mediana_zona_eur_m2:A.b?A.b.eur_m2:null, comparaveis_na_zona:A.b?A.b.n:null, mesma_tipologia:A.usaTip, diferenca_vs_mediana_pct:A.pct,
+    intervalo_justo:A.lo?[A.lo,A.hi]:null, preco_recomendado:A.rec||null, ajuste_caracteristicas_pct:A.adj?Math.round((A.adj-1)*100):0,
+    renda_estimada_mes:A.renda||null, yield_bruta_pct:A.yb||null, dias_medianos_zona:A.dias||null, descidas_preco_zona_pct:A.descPct, tempo_venda_estimado_dias:A.tVenda||null,
+    compradores_compativeis:A.cp.length, comparaveis:(A.comps||[]).slice(0,6).map(function(c){ return {area:c.area, preco:c.price, eur_m2:c.eur, dias:c.dias}; }),
+    nota_fonte:'preços pedidos em anúncios recolhidos pela app'};
+}
+function analisar(m, zq, ctx){
+  if(!sess){ toast('Entre na conta para analisar'); return; }
+  anaCur={m:m, zq:zq||m.zona, ctx:ctx||{}};
+  openModal('<div class="sheet-h"><h2>Análise do imóvel</h2><button class="x" onclick="closeModal()">×</button></div><div class="spin">A cruzar com o mercado…</div>');
+  var tip=tipBucket(m.quartos), neg=m.negocio==='Arrendamento'?'arrendamento':'venda', zz=anaCur.zq, done=0, dV=null, dA=null;
+  function fim(){ if(++done<2) return; var A=anaCalc(m,dV,dA); A.zq=zz; anaCur.A=A; anaRender(); anaPedirIA(); }
+  getMkt(zz, tip, neg, function(d){ dV=d; fim(); });
+  if(neg==='venda') getMkt(zz, tip, 'arrendamento', function(d){ dA=d; fim(); }); else fim();
+}
+function anaKey(A){ return [A.m.titulo,A.preco,A.area,A.zq,A.m.quartos].join('|'); }
+function anaPedirIA(){
+  var A=anaCur&&anaCur.A; if(!A||!A.ok) return; var k=anaKey(A);
+  if(anaIA[k]){ anaRender(); return; }
+  withToken(function(t){
+    if(!t) return;
+    xhr('POST', SB_URL+'/functions/v1/analise-ia', {apikey:SB_KEY, Authorization:'Bearer '+t, 'Content-Type':'application/json'}, JSON.stringify({analise:anaResumoIA(A)}), function(st,j){
+      anaIA[k]=(st===200&&j&&j.resumo)?j:{erro:true};
+      if(anaCur&&anaCur.A===A&&document.getElementById('anabox')) anaRender();
+    });
+  });
+}
+function anaBar(lbl, n){ return '<div style="margin:6px 0"><div class="row"><div class="grow note" style="margin:0">'+esc(lbl)+'</div><b>'+n+'</b></div><div style="height:6px;border-radius:3px;background:var(--line);overflow:hidden"><div style="height:100%;width:'+n+'%;background:'+(n>=70?'var(--green)':(n>=45?'var(--gold)':'var(--red)'))+'"></div></div></div>'; }
+function anaRender(){
+  var A=anaCur.A, m=A.m, ctx=anaCur.ctx, i, unit=A.arr?'/mês':'';
+  var h='<div class="sheet-h"><h2>Análise do imóvel</h2><button class="x" onclick="'+(ctx.back||'closeModal()')+'">×</button></div><div id="anabox">';
+  h+='<div class="card"><div class="name" style="white-space:normal">'+esc(imvTitulo(m))+'</div><div class="sub" style="white-space:normal">'+esc([A.preco?eur(A.preco)+unit:'',tipol(m),A.area?A.area+' m²':'',A.zq].filter(function(x){return x;}).join(' · '))+'</div></div>';
+  if(!A.ok){
+    h+='<div class="card note">Não há dados suficientes para analisar: '+(!A.area||!A.preco?'falta o preço ou a área. ':'')+(!A.b?'há menos de 3 anúncios comparáveis em “'+esc(A.zq||'—')+'”. Experimente uma zona mais abrangente (ex.: o concelho).':'')+'</div>';
+    if(ctx.editar) h+='<button class="btn full" onclick="'+ctx.editar+'">Corrigir dados</button>';
+    openModal(h+'</div>'); return;
+  }
+  var g=A.g;
+  h+='<div class="card" style="text-align:center"><div style="font-family:var(--fh);font-size:46px;font-weight:700;line-height:1">'+A.nota+'<span style="font-size:18px;color:var(--muted)">/100</span></div>'+
+     '<span class="tag '+g[2]+'" style="margin-top:6px">'+g[0]+' · '+esc(g[1])+'</span>';
+  for(i=0;i<A.parts.length;i++) h+=anaBar(A.parts[i][0]+' ('+Math.round(A.parts[i][2]*100)+'%)', A.parts[i][1]);
+  h+='</div>';
+  var ia=anaIA[anaKey(A)];
+  h+='<div class="card" style="background:var(--cream)">'+(ia&&ia.resumo?'💡 '+esc(ia.resumo):(ia&&ia.erro?'<span class="note">A IA não respondeu; os números abaixo estão completos.</span>':'<span class="note">⏳ A IA está a escrever o resumo…</span>'))+'</div>';
+  // Preço
+  h+='<h3>Preço</h3><div class="card">';
+  h+='<div class="row"><div class="grow"><div class="note" style="margin:0">Preço recomendado</div><div style="font-size:22px;font-weight:700;font-family:var(--fh)">'+eur(A.rec)+unit+'</div></div>'+
+     '<div style="text-align:right"><div class="note" style="margin:0">Intervalo justo</div><b>'+eur(A.lo)+' – '+eur(A.hi)+'</b></div></div>';
+  h+='<div class="note" style="margin-top:6px">Pede '+eurm2(A.eur)+', '+difTxt(A.eur,A.b.eur_m2)+' de '+(A.usaTip&&tipBucket(m.quartos)?tipBucket(m.quartos)+' ':'')+'em '+esc(A.zq)+' ('+eurm2(A.b.eur_m2)+', '+A.b.n+' anúncios)'+(A.adj&&A.adj!==1?'. Ajuste de +'+Math.round((A.adj-1)*100)+'% pelas características':'')+'.</div>';
+  if(ia&&ia.preco) h+='<div style="margin-top:6px">'+esc(ia.preco)+'</div>';
+  if(A.tVenda) h+='<div class="note" style="margin-top:6px">⏱️ Tempo de venda estimado a este preço: ~'+A.tVenda+' dias (mediana da zona: '+A.dias+' dias).</div>';
+  h+='</div>';
+  // Comparáveis
+  if(A.comps.length){
+    h+='<h3>Comparáveis ('+A.comps.length+')</h3><div class="card">';
+    for(i=0;i<A.comps.length;i++){ var c=A.comps[i], okU=c.url&&/^https?:\/\//.test(c.url);
+      h+='<div class="row" style="padding:5px 0;border-top:'+(i?'1px solid var(--line)':'0')+'"><div class="grow"><div style="font-size:14px;'+(okU?'text-decoration:underline':'')+'" '+(okU?'onclick="abrirExt(\''+esc(c.url)+'\')"':'')+'>'+esc(String(c.title||'Anúncio').substring(0,48))+'</div><div class="note" style="margin:0">'+esc([c.area?c.area+' m²':'',c.dias!=null?c.dias+' dias':'',c.fr||''].filter(function(x){return x;}).join(' · '))+'</div></div><div style="text-align:right"><b>'+eur(c.price)+'</b><div class="note" style="margin:0">'+eurm2(c.eur)+'</div></div></div>'; }
+    h+='<div class="note" style="margin-top:6px">Preços pedidos em anúncios recolhidos pela app (não são valores de venda).</div></div>';
+  }
+  // Renda
+  if(A.renda) h+='<h3>Renda e rentabilidade</h3><div class="card"><div class="row"><div class="grow">Renda estimada</div><b>'+eur(A.renda)+'/mês</b></div><div class="row"><div class="grow">Rentabilidade bruta</div><b>'+String(A.yb).replace('.',',')+'%</b></div><div class="note">Com base em '+A.rendaN+' anúncios de arrendamento na zona. Antes de impostos, condomínio, IMI e meses vazios.</div></div>';
+  // Mercado
+  if(A.nM!=null) h+='<h3>Mercado da zona</h3><div class="card"><div class="row"><div class="grow">Dias medianos anunciados</div><b>'+(A.dias||'—')+'</b></div><div class="row"><div class="grow">Anúncios com descida de preço</div><b>'+A.descPct+'%</b></div><div class="row"><div class="grow">Oferta comparável</div><b>'+A.oferta+'</b></div></div>';
+  // Compradores
+  h+='<h3>Compradores no seu CRM ('+A.cp.length+')</h3>';
+  if(!A.cp.length) h+='<div class="note">Nenhum comprador com critérios compatíveis.</div>';
+  for(i=0;i<A.cp.length;i++){ var cc=A.cp[i].c; h+='<div class="ap"><div class="row"><div class="grow"><div class="t">'+esc(cc.nome)+'</div><div class="sub">'+esc(procuraTxt(cc))+'</div></div>'+(ctx.imvId?'<button class="btn gold sm" onclick="propor(\''+cc.id+'\',\''+ctx.imvId+'\',\'imv\')">Propor</button>':'')+'</div></div>'; }
+  // Argumentos e riscos
+  if(ia&&ia.argumentos&&ia.argumentos.length){
+    h+='<h3>Argumentos para o proprietário</h3><div class="card">';
+    for(i=0;i<ia.argumentos.length;i++) h+='<div style="padding:5px 0;border-top:'+(i?'1px solid var(--line)':'0')+'">“'+esc(ia.argumentos[i])+'”</div>';
+    h+='</div>';
+  }
+  if(ia&&ia.riscos&&ia.riscos.length){
+    h+='<h3>Riscos</h3><div class="card">';
+    for(i=0;i<ia.riscos.length;i++) h+='<div style="padding:5px 0;border-top:'+(i?'1px solid var(--line)':'0')+'"><b>⚠️ '+esc(ia.riscos[i].risco)+'</b><div class="note" style="margin:0">'+esc(ia.riscos[i].acao)+'</div></div>';
+    h+='</div>';
+  }
+  if(ia&&ia.proximo_passo) h+='<div class="card" style="border-color:var(--gold)"><b>👉 Próximo passo:</b> '+esc(ia.proximo_passo)+'</div>';
+  // Ações
+  h+='<div class="btns" style="margin-top:12px"><button class="btn ghost" onclick="anaCopiar()">📋 Copiar resumo</button>'+(navigator.share?'<button class="btn ghost" onclick="anaPartilhar()">↗️ Partilhar</button>':'')+'</div>';
+  if(ctx.imvId){ var mi=imvById(ctx.imvId); if(mi&&mi.dono&&byId(mi.dono)) h+='<button class="btn gold full" style="margin-top:8px" onclick="openRelatorio(\''+mi.dono+'\',\''+mi.id+'\')">📄 Estudo de mercado para o proprietário</button>'; }
+  else h+='<button class="btn gold full" style="margin-top:8px" onclick="anaGuardarImv()">💾 Guardar como imóvel</button>';
+  h+='<div class="note" style="margin-top:10px">Análise indicativa com base em anúncios; não substitui uma avaliação oficial.</div>';
+  var sc=document.getElementById('sheet').scrollTop; openModal(h+'</div>'); if(document.getElementById('anabox')) document.getElementById('sheet').scrollTop=sc;
+  if(ctx.imvId){ var mx=imvById(ctx.imvId); if(mx && (!mx.analise || mx.analise.nota!==A.nota || mx.analise.rec!==A.rec)){ mx.analise={d:nowLocal(), nota:A.nota, g:g[0], rec:A.rec, lo:A.lo, hi:A.hi}; mx.upd=Date.now(); saveLocal(); scheduleSync(); } }
+}
+function anaTexto(){
+  var A=anaCur.A, m=A.m, ia=anaIA[anaKey(A)]||{}, unit=A.arr?'/mês':'', t;
+  t='Análise — '+imvTitulo(m)+'\n'+[A.preco?eur(A.preco)+unit:'',tipol(m),A.area?A.area+' m²':'',A.zq].filter(function(x){return x;}).join(' · ')+'\n\n';
+  t+='Nota: '+A.nota+'/100 ('+A.g[0]+' — '+A.g[1]+')\n';
+  t+='Preço recomendado: '+eur(A.rec)+unit+' (intervalo '+eur(A.lo)+' – '+eur(A.hi)+')\n';
+  t+='Face à zona: '+eurm2(A.eur)+', '+difTxt(A.eur,A.b.eur_m2)+' ('+eurm2(A.b.eur_m2)+', '+A.b.n+' anúncios)\n';
+  if(A.renda) t+='Renda estimada: '+eur(A.renda)+'/mês · rentabilidade bruta '+String(A.yb).replace('.',',')+'%\n';
+  if(A.tVenda) t+='Tempo de venda estimado: ~'+A.tVenda+' dias\n';
+  t+='Compradores compatíveis no CRM: '+A.cp.length+'\n';
+  if(ia.resumo) t+='\n'+ia.resumo+'\n';
+  if(ia.proximo_passo) t+='\nPróximo passo: '+ia.proximo_passo+'\n';
+  return t;
+}
+function anaCopiar(){ var ta=document.createElement('textarea'); ta.id='anatmp'; ta.value=anaTexto(); ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); var ok=copyEl('anatmp'); document.body.removeChild(ta); toast(ok?'Resumo copiado':'Não foi possível copiar'); }
+function anaPartilhar(){ try{ navigator.share({title:'Análise do imóvel', text:anaTexto()}); }catch(e){} }
+function anaGuardarImv(){
+  var m=anaCur.A.m, pre={}; for(var k in m){ if(m.hasOwnProperty(k)) pre[k]=m[k]; }
+  pre.estado=pre.estado||'Disponível'; pre.origem=pre.origem||'Particular'; pre.agencia=pre.agencia||''; pre.dono=''; pre.notas=(pre.notas?pre.notas+'\n':'')+'Análise: '+anaCur.A.nota+'/100 · preço recomendado '+eur(anaCur.A.rec);
+  openImv(null, pre);
+}
+function analisarImv(id){ var m=imvById(id); if(!m) return; analisar(m, m.zona, {imvId:id, back:'openImvFicha(\''+id+'\')', editar:'openImv(\''+id+'\')'}); }
+function analisarLead(leadId){
+  var i=findLead(leadId); if(i<0) return; var L=olx[i], k, zona='Outra', where=((L.freguesia||'')+' '+(L.concelho||'')).toLowerCase();
+  for(k=0;k<ZONAS.length;k++){ if(ZONAS[k]!=='Outra' && where.indexOf(ZONAS[k].toLowerCase())>-1){ zona=ZONAS[k]; break; } }
+  var qm=String(L.tipologia||'').match(/(\d)/), arr=/arrend|alug/i.test(L.negocio||'');
+  var m={titulo:L.title||'', negocio:arr?'Arrendamento':'Venda', tipo:/moradia|vivenda|casa\b/i.test(L.title||'')?'Moradia':'Apartamento', quartos:qm?qm[1]:'', preco:L.price||'', area:L.area_m2||'', zona:zona, morada:'', link:L.url||'', extras:[], origem:'Particular', estado:'Disponível'};
+  analisar(m, L.freguesia||zona, {back:'openLead(\''+leadId+'\')'});
+}
+function openAnaliseLink(){
+  var h='<div class="sheet-h"><h2>Analisar um anúncio</h2><button class="x" onclick="closeModal()">×</button></div>';
+  h+='<div class="note" style="margin-bottom:8px">Cole o link (Idealista, Imovirtual, OLX, Casa Sapo…) ou preencha à mão. A app compara com os anúncios da zona, a renda e os compradores do seu CRM.</div>';
+  h+='<label>Link do anúncio</label><input id="alink" type="url" autocapitalize="off" placeholder="https://…"><button class="btn ghost sm full" id="aler" style="margin-top:8px" onclick="anaLerLink()">✨ Ler o anúncio</button>';
+  h+='<div class="g2"><div><label>Negócio</label><select id="aneg">'+opts(IMV_NEG,'Venda')+'</select></div><div><label>Tipo</label><select id="atipo">'+opts(IMV_TIPO,'Apartamento')+'</select></div></div>';
+  h+='<div class="g2"><div><label>Quartos (T)</label><select id="aqt">'+opts(['','0','1','2','3','4','5','6'],'2')+'</select></div><div><label>Área (m²)</label><input id="aarea" type="number" inputmode="numeric"></div></div>';
+  h+='<div class="g2"><div><label>Preço (€)</label><input id="apre" type="number" inputmode="numeric"></div><div><label>Zona / freguesia</label><input id="azona" list="azonas" placeholder="ex.: Carnaxide"><datalist id="azonas">'+ZONAS.filter(function(z){return z!=='Outra';}).map(function(z){return '<option value="'+esc(z)+'">';}).join('')+'</datalist></div></div>';
+  h+='<label>Características</label><div class="chips" id="aext" style="flex-wrap:wrap;overflow:visible">';
+  for(var i=0;i<IMV_EXT.length;i++) h+='<button type="button" class="chip" data-x="'+esc(IMV_EXT[i])+'" onclick="this.className=this.className.indexOf(\' on\')>-1?\'chip\':\'chip on\'">'+esc(IMV_EXT[i])+'</button>';
+  h+='</div><input type="hidden" id="atit"><button class="btn gold full" style="margin-top:14px" onclick="anaDoForm()">🔎 Analisar</button>';
+  openModal(h);
+}
+function anaLerLink(){
+  var url=v('alink'); if(!/^https?:\/\//.test(url)){ toast('Cole o link do anúncio'); return; }
+  var b=document.getElementById('aler'); if(b) b.innerHTML='⏳ A ler o anúncio…';
+  withToken(function(t){
+    if(!t){ toast('Sem ligação / sessão'); return; }
+    xhr('POST', SB_URL+'/functions/v1/imovel-link', {apikey:SB_KEY, Authorization:'Bearer '+t, 'Content-Type':'application/json'}, JSON.stringify({url:url}), function(st,j){
+      if(b) b.innerHTML='✨ Ler o anúncio';
+      if(st!==200||!j||j.error){ toast(j&&j.error==='bloqueado'?'Este site não deixa ler — preencha à mão':'Não foi possível ler — preencha à mão'); return; }
+      function set(id,val){ var e=document.getElementById(id); if(e&&val!=null&&val!=='') e.value=String(val); }
+      set('aneg',j.negocio); set('atipo',j.tipo); if(j.quartos!=null) set('aqt',String(j.quartos)); set('aarea',j.area); set('apre',j.preco); set('atit',j.titulo);
+      set('azona', j.freguesia || (j.zona&&j.zona!=='Outra'?j.zona:'') || '');
+      var ex=j.extras||[], cs=document.getElementById('aext').children; for(var i=0;i<cs.length;i++){ if(ex.indexOf(cs[i].getAttribute('data-x'))>-1) cs[i].className='chip on'; }
+      toast('Anúncio lido — confirme a zona e analise');
+    });
+  });
+}
+function anaDoForm(){
+  var z=v('azona'), ex=[], cs=document.getElementById('aext').children;
+  for(var i=0;i<cs.length;i++){ if(cs[i].className.indexOf(' on')>-1) ex.push(cs[i].getAttribute('data-x')); }
+  if(!v('apre')||!v('aarea')){ toast('Preencha o preço e a área'); return; }
+  if(!z){ toast('Escreva a zona ou freguesia'); return; }
+  var zona='Outra'; for(var k=0;k<ZONAS.length;k++){ if(ZONAS[k]!=='Outra' && z.toLowerCase().indexOf(ZONAS[k].toLowerCase())>-1){ zona=ZONAS[k]; break; } }
+  var m={titulo:v('atit'), negocio:v('aneg'), tipo:v('atipo'), quartos:v('aqt'), preco:v('apre'), area:v('aarea'), zona:zona, morada:'', link:v('alink'), extras:ex, origem:'Particular', estado:'Disponível'};
+  analisar(m, z, {back:'openAnaliseLink()'});
+}
 function openImvFicha(id){
   var m=imvById(id); if(!m) return; var q="'"+id+"'", i;
   var h='<div class="sheet-h"><h2>'+esc(imvTitulo(m))+'</h2><button class="x" onclick="closeModal()">×</button></div>';
@@ -1511,6 +1720,7 @@ function openImvFicha(id){
   h+='<div class="btns">'+(m.link&&/^https?:\/\//.test(m.link)?'<a class="btn ghost sm" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="'+esc(m.link)+'">Ver anúncio</a>':'')+
      '<button class="btn ghost sm" onclick="openImv('+q+')">Editar</button></div>';
   h+='<h3>Face ao mercado</h3><div id="mktbox">'+mktBox(m)+'</div>';
+  h+='<button class="btn gold full" style="margin-top:8px" onclick="analisarImv('+q+')">🔎 Análise completa'+(m.analise?' · última: '+m.analise.nota+'/100 ('+esc(m.analise.g)+')':' (nota 0–100)')+'</button>';
   if(m.dono && byId(m.dono)) h+='<button class="btn ghost full" style="margin-top:8px" onclick="openRelatorio(\''+m.dono+'\',\''+m.id+'\')">📄 Relatório de mercado para o proprietário</button>';
   var eI=(m.estudos||[])[0];
   h+='<h3>Estudo do Analista</h3>'+(eI?estudoCard(eI,'i',m.id):'')+'<button class="btn ghost full" onclick="openEstudo(\'i\',\''+m.id+'\')">＋ '+(eI?'Importar estudo mais recente':'Importar estudo do Analista')+'</button>';
