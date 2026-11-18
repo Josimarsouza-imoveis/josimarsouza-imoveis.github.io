@@ -633,7 +633,7 @@ function readAg(){
 var pendingLead=null, pendingProcura=null, pendingAg=null;
 function openForm(id, preset){
   var c=id?byId(id):null; var novo=!c;
-  if(!preset){ pendingLead=null; pendingProcura=null; pendingAg=null; }
+  if(!preset){ pendingLead=null; pendingProcura=null; pendingAg=null; pendingAngNovo=false; }
   c=c||preset||{nome:'',tel:'',email:'',tipo:'Proprietário (venda)',origem:'OLX',zona:'Alfragide',estado:'Novo',interesse:'',orcamento:'',notas:''};
   var h='<div class="sheet-h"><h2>'+(novo?'Novo contacto':'Editar contacto')+'</h2><button class="x" onclick="closeModal()">×</button></div>';
   if(novo && !preset) h+='<button class="btn full" style="margin-bottom:6px" onclick="openQuickIA()">✨ Criar a falar ou a escrever (IA)</button><div class="note" style="text-align:center;margin-bottom:4px">ou preencha à mão:</div>';
@@ -669,6 +669,7 @@ function saveForm(id){
     db.contacts.push(c);
     if(pendingLead){ markLead(pendingLead); pendingLead=null; }
   }
+  if(!id && pendingAngNovo){ pendingAngNovo=false; save(c); render(); angForm(c.id); toast('Proprietário criado — preencha o contrato'); return; }
   save(c); render(); openContact(c.id); toast('Guardado');
   if(addCal && a) askCal(c.id, a.id);
 }
@@ -1427,8 +1428,9 @@ function vAng(){
   vd.sort(function(a,b){ return (a.ang.vendidoEm||'')>(b.ang.vendidoEm||'')?-1:1; });
   var h='<h2>Contratos e comissões</h2>';
   h+='<div class="stats"><div class="stat"><b>'+at.length+'</b><span>Ativas · '+ex+' excl.</span></div><div class="stat"><b style="font-size:19px">'+eur(prev)+'</b><span>Prevista</span></div><div class="stat"><b style="font-size:19px">'+eur(ano)+'</b><span>Vendido '+y+'</span></div></div>';
+  h+='<div class="btns" style="margin:10px 0"><button class="btn gold" onclick="angNovo()">＋ Novo contrato</button><button class="btn ghost" onclick="simCom()">🧮 Simular comissão</button></div>';
   h+='<div class="note">Valores sem IVA. Se indicar “a minha parte (%)” num contrato, conta só a sua parte; senão conta a comissão total.</div>';
-  h+='<h3>Ativas</h3>'; if(!at.length) h+='<div class="empty">Ainda não há contratos ativos. Registe-os na ficha de cada proprietário.</div>';
+  h+='<h3>Ativas</h3>'; if(!at.length) h+='<div class="empty">Ainda não há contratos ativos. Toque em “＋ Novo contrato”.</div>';
   for(i=0;i<at.length;i++) h+=angCard(at[i]);
   if(vd.length){ h+='<h3>Vendidas</h3>'; for(i=0;i<vd.length;i++) h+=angCard(vd[i]); }
   if(tm.length){ h+='<h3>Terminadas</h3>'; for(i=0;i<tm.length;i++) h+=angCard(tm[i]); }
@@ -1442,7 +1444,48 @@ var IMV_EST=['Disponível','Reservado','Vendido / Arrendado','Retirado'], IMV_EX
 var VIS_EST=['Proposto','Visita marcada','Visitado','Proposta feita','Descartado'], VIS_OP=['Opinião do cliente…','👍 Gostou','🤔 Talvez','👎 Não gostou'];
 var imvF={q:'',est:'Disponível',neg:'Todos'};
 function comprador(c){ return c.tipo==='Comprador' || c.tipo==='Arrendatário' || c.tipo==='Investidor'; }
-function fabAdd(){ if(cur==='imoveis') openImv(); else openForm(); }
+function fabAdd(){ if(cur==='imoveis') openImv(); else if(cur==='ang') angNovo(); else openForm(); }
+function angNovo(){
+  var vs=db.contacts.filter(function(c){ return vendedor(c); }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+  var h='<div class="sheet-h"><h2>Novo contrato</h2><button class="x" onclick="closeModal()">×</button></div>';
+  h+='<button class="btn gold full" onclick="angNovoProp()">＋ Novo proprietário</button>';
+  h+='<h3>Ou escolha o proprietário</h3>';
+  if(!vs.length) h+='<div class="note">Ainda não tem proprietários (tipo “Proprietário” ou “Senhorio”) nos contactos.</div>';
+  else h+='<input class="search" placeholder="Pesquisar nome…" oninput="var q=this.value.toLowerCase(),r=document.querySelectorAll(\'#angl .card\');for(var i=0;i<r.length;i++)r[i].style.display=r[i].getAttribute(\'data-n\').indexOf(q)>-1?\'\':\'none\'">';
+  h+='<div id="angl">';
+  for(var i=0;i<vs.length;i++){ var c=vs[i]; h+='<div class="card tap" data-n="'+esc(c.nome.toLowerCase())+'" onclick="angForm(\''+c.id+'\')"><div class="row"><div class="grow"><div class="name">'+esc(c.nome)+'</div><div class="sub">'+esc(c.interesse||c.zona||'')+'</div></div>'+(c.ang?'<span class="tag '+(c.ang.estado==='Ativa'?'green':'')+'">'+esc(c.ang.estado)+'</span>':'')+'</div></div>'; }
+  openModal(h+'</div>');
+}
+function angNovoProp(){ pendingAngNovo=true; openForm(null,{nome:'',tel:'',email:'',tipo:'Proprietário (venda)',origem:'Referência',zona:'Outra',estado:'Angariado / Fechado',interesse:'',orcamento:'',notas:''}); }
+var pendingAngNovo=false;
+function simCom(){
+  var h='<div class="sheet-h"><h2>Simular comissão</h2><button class="x" onclick="closeModal()">×</button></div>';
+  h+='<label>Preço de venda (€)</label><input id="spre" type="number" inputmode="numeric" placeholder="ex.: 300000" oninput="simCalc()">';
+  h+='<div class="g2"><div><label>Comissão (%)</label><input id="spct" type="number" inputmode="decimal" step="0.1" value="5" oninput="simCalc()"></div>'+
+     '<div><label>A minha parte (%)</label><input id="smin" type="number" inputmode="decimal" step="1" placeholder="ex.: 50" oninput="simCalc()"></div></div>';
+  h+='<div class="g2"><div><label>Partilha com outra agência</label><select id="spar" onchange="simCalc()"><option value="0">Não</option><option value="50">Sim, 50/50</option><option value="40">Sim, fico com 60%</option></select></div>'+
+     '<div><label>IVA (%)</label><input id="siva" type="number" inputmode="decimal" value="23" oninput="simCalc()"></div></div>';
+  h+='<div id="sres" style="margin-top:12px"></div>';
+  h+='<div class="note" style="margin-top:8px">Simulação: não fica guardada. A “minha parte” é a percentagem que recebe da comissão da agência (acordo com a Imotrust).</div>';
+  openModal(h); simCalc();
+}
+function simCalc(){
+  var r=document.getElementById('sres'); if(!r) return;
+  var p=Number(v('spre'))||0, pct=Number(v('spct'))||0, mn=v('smin')===''?null:Number(v('smin')), par=Number(v('spar'))||0, iva=Number(v('siva'))||0;
+  if(!p||!pct){ r.innerHTML='<div class="note">Indique o preço e a comissão.</div>'; return; }
+  var com=p*pct/100, agencia=com*(1-par/100), ivaV=com*iva/100, minha=mn!=null?agencia*mn/100:null, liq=p-com-ivaV;
+  function row(l,val,b){ return '<div class="row" style="padding:5px 0;border-top:1px solid var(--line)"><div class="grow">'+l+'</div>'+(b?'<b>'+val+'</b>':val)+'</div>'; }
+  var h='<div class="card">';
+  h+='<div class="row"><div class="grow"><div class="note" style="margin:0">Comissão total (sem IVA)</div><div style="font-size:24px;font-weight:700;font-family:var(--fh)">'+eur(com)+'</div></div></div>';
+  h+=row('IVA ('+iva+'%)', eur(ivaV))+row('Proprietário paga (com IVA)', eur(com+ivaV), true);
+  if(par) h+=row('Fica para a Imotrust ('+(100-par)+'%)', eur(agencia), true);
+  if(minha!=null) h+=row('<b>A minha parte ('+mn+'%)</b>', '<span style="font-size:18px;font-weight:700;color:var(--green)">'+eur(minha)+'</span>');
+  h+=row('Proprietário recebe (líquido da comissão)', eur(liq));
+  h+='</div><h3>Comparar percentagens</h3><div class="card">';
+  var ps=[3,4,5,6];
+  for(var i=0;i<ps.length;i++){ var c2=p*ps[i]/100, a2=c2*(1-par/100); h+=row(ps[i]+'%', eur(c2)+(minha!=null?' · <span class="note">a sua parte '+eur(a2*mn/100)+'</span>':''), ps[i]===pct); }
+  r.innerHTML=h+'</div>';
+}
 function imvById(id){ var i=idxIn(db.imoveis,id); return i>-1?db.imoveis[i]:null; }
 function tipol(m){ return m.tipo==='Moradia' ? 'Moradia'+(m.quartos!==''&&m.quartos!=null?' T'+m.quartos:'') : (m.tipo==='Apartamento' ? (m.quartos!==''&&m.quartos!=null?'T'+m.quartos:'Apartamento') : (m.tipo||'')); }
 function imvLinha(m){ return [m.preco?eur(m.preco)+(m.negocio==='Arrendamento'?'/mês':''):'', tipol(m), m.area?m.area+' m²':'', m.zona&&m.zona!=='Outra'?m.zona:''].filter(function(x){return x;}).join(' · '); }
